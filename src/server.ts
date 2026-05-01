@@ -109,6 +109,18 @@ const server = net.createServer((socket) => {
                 }
             }
 
+            if (line.startsWith("ISON ")) {
+                const requestedNicks = line
+                    .split(" ")
+                    .slice(1)
+                    .map((n) => n.trim())
+                    .filter(Boolean);
+
+                const onlineNicks = requestedNicks.filter((n) => clientsByNick.has(n));
+
+                send(`:irc-server 303 ${nick} :${onlineNicks.join(" ")}`);
+            }
+
             if (line.startsWith("JOIN ")) {
                 const parts = line.split(" ");
                 const channel = parts[1]?.trim();
