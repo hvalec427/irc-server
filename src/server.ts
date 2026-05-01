@@ -275,6 +275,15 @@ const server = net.createServer((socket) => {
                 send(`:irc-server 318 ${nick} ${target} :End of WHOIS list`);
             }
 
+            if (line.trim() === "LUSERS") {
+                const userCount = clientsByNick.size;
+                const channelCount = channels.size;
+
+                send(
+                    `:irc-server 251 ${nick} :There are ${userCount} users and ${channelCount} channels`
+                );
+            }
+
             if (line.startsWith("QUIT")) {
                 const message = line.split(" :")[1] ?? "Client quit";
 
