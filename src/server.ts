@@ -94,6 +94,37 @@ const server = net.createServer((socket) => {
                 send(`:irc-server 353 ${nick} = ${channel} :${members}`);
                 send(`:irc-server 366 ${nick} ${channel} :End of /NAMES list`);
             }
+
+            if (line.startsWith("PRIVMSG ")) {
+                const target = line.split(" ")[1];
+                const message = line.split(" :")[1];
+
+                if (!nick || !username) {
+                    send(":irc-server 451 * :You have not registered");
+                    continue;
+                }
+
+                if (!target || !message) {
+                    continue;
+                }
+
+                if (target.startsWith("#")) {
+                    const members = channels.get(target);
+
+                    if (!members) {
+                        send(`:irc-server 403 ${nick} ${target} :No such channel`);
+                        continue;
+                    }
+
+                    for (const member of members) {
+                        if (member !== socket) {
+                            member.write(
+                                `:${nick}!${username}@localhost PRIVMSG ${target} :${message}\r\n`
+                            );
+                        }
+                    }
+                }
+            }
         }
     });
 
