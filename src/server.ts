@@ -5,6 +5,8 @@ const channels = new Map<string, Set<net.Socket>>();
 const clientsByNick = new Map<string, net.Socket>();
 const topics = new Map<string, string>();
 const channelOperators = new Map<string, Set<net.Socket>>();
+const inviteOnlyChannels = new Set<string>();
+const channelInvites = new Map<string, Set<string>>();
 
 const server = net.createServer((socket) => {
     let nick = "";
@@ -121,6 +123,17 @@ const server = net.createServer((socket) => {
                     channels.set(channel, new Set());
                 }
 
+                if (inviteOnlyChannels.has(channel)) {
+                    const invites = channelInvites.get(channel);
+
+                    if (!invites?.has(nick)) {
+                        send(`:irc-server 473 ${nick} ${channel} :Cannot join channel (+i)`);
+                        continue;
+                    }
+
+                    invites.delete(nick);
+                }
+
                 channels.get(channel)!.add(socket);
                 if (!channelOperators.has(channel)) {
                     channelOperators.set(channel, new Set());
@@ -132,7 +145,13 @@ const server = net.createServer((socket) => {
                 for (const member of channels.get(channel)!) {
                     member.write(`:${nick}!${username}@localhost JOIN ${channel}\r\n`);
                 }
-                send(`:irc-server 331 ${nick} ${channel} :No topic is set`);
+                const topic = topics.get(channel);
+
+                if (topic) {
+                    send(`:irc-server 332 ${nick} ${channel} :${topic}`);
+                } else {
+                    send(`:irc-server 331 ${nick} ${channel} :No topic is set`);
+                }
                 const members = [...channels.get(channel)!]
                     .map((s) => {
                         const isOp = channelOperators.get(channel)?.has(s);
@@ -145,8 +164,55 @@ const server = net.createServer((socket) => {
                 send(`:irc-server 366 ${nick} ${channel} :End of /NAMES list`);
             }
 
+            if (line.startsWith("INVITE ")) {
+                const parts = line.split(" ");
+                const targetNick = parts[1]?.trim();
+                const channel = parts[2]?.trim();
+
+                if (!targetNick || !channel) continue;
+
+                const members = channels.get(channel);
+                const ops = channelOperators.get(channel);
+
+                if (!members) {
+                    send(`:irc-server 403 ${nick} ${channel} :No such channel`);
+                    continue;
+                }
+
+                if (!members.has(socket)) {
+                    send(`:irc-server 442 ${nick} ${channel} :You're not on that channel`);
+                    continue;
+                }
+
+                if (!ops?.has(socket)) {
+                    send(`:irc-server 482 ${nick} ${channel} :You're not channel operator`);
+                    continue;
+                }
+
+                const targetSocket = clientsByNick.get(targetNick);
+
+                if (!targetSocket) {
+                    send(`:irc-server 401 ${nick} ${targetNick} :No such nick`);
+                    continue;
+                }
+
+                if (!channelInvites.has(channel)) {
+                    channelInvites.set(channel, new Set());
+                }
+
+                channelInvites.get(channel)!.add(targetNick);
+
+                targetSocket.write(
+                    `:${nick}!${username}@localhost INVITE ${targetNick} :${channel}\r\n`
+                );
+
+                send(`:irc-server 341 ${nick} ${targetNick} ${channel}`);
+            }
+
             if (line.startsWith("MODE ")) {
-                const target = line.split(" ")[1]?.trim();
+                const parts = line.split(" ");
+                const target = parts[1]?.trim();
+                const mode = parts[2]?.trim();
 
                 if (!target) continue;
 
@@ -156,9 +222,19 @@ const server = net.createServer((socket) => {
                         continue;
                     }
 
-                    send(`:irc-server 324 ${nick} ${target} +`);
-                } else {
-                    send(`:irc-server 221 ${nick} +`);
+                    if (mode === "+i") {
+                        inviteOnlyChannels.add(target);
+                        send(`:${nick}!${username}@localhost MODE ${target} +i`);
+                        continue;
+                    }
+
+                    if (mode === "-i") {
+                        inviteOnlyChannels.delete(target);
+                        send(`:${nick}!${username}@localhost MODE ${target} -i`);
+                        continue;
+                    }
+
+                    send(`:irc-server 324 ${nick} ${target} ${inviteOnlyChannels.has(target) ? "+i" : "+"}`);
                 }
             }
 
