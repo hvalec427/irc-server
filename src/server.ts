@@ -133,11 +133,18 @@ const server = net.createServer((socket) => {
 
                     for (const member of members) {
                         if (member !== socket) {
-                            member.write(
-                                `:${nick}!${username}@localhost PRIVMSG ${target} :${message}\r\n`
-                            );
+                            member.write(`:${nick}!${username}@localhost PRIVMSG ${target} :${message}\r\n`);
                         }
                     }
+                } else {
+                    const recipient = clientsByNick.get(target);
+
+                    if (!recipient) {
+                        send(`:irc-server 401 ${nick} ${target} :No such nick`);
+                        continue;
+                    }
+
+                    recipient.write(`:${nick}!${username}@localhost PRIVMSG ${target} :${message}\r\n`);
                 }
             }
 
