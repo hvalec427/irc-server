@@ -3,6 +3,7 @@ import net from "net";
 const usedNicks = new Set<string>();
 const channels = new Map<string, Set<net.Socket>>();
 const clientsByNick = new Map<string, net.Socket>();
+const topics = new Map<string, string>();
 
 const server = net.createServer((socket) => {
     let nick = "";
@@ -137,10 +138,43 @@ const server = net.createServer((socket) => {
                 send(`:irc-server 321 ${nick} Channel :Users Name`);
 
                 for (const [channel, members] of channels) {
-                    send(`:irc-server 322 ${nick} ${channel} ${members.size} :No topic`);
+                    const topic = topics.get(channel) ?? "No topic";
+                    send(`:irc-server 322 ${nick} ${channel} ${members.size} :${topic}`);
                 }
 
                 send(`:irc-server 323 ${nick} :End of /LIST`);
+            }
+
+            if (line.startsWith("TOPIC ")) {
+                const channel = line.split(" ")[1];
+                const newTopic = line.split(" :")[1];
+
+                if (!channel) continue;
+
+                if (!channels.has(channel)) {
+                    send(`:irc-server 403 ${nick} ${channel} :No such channel`);
+                    continue;
+                }
+
+                // set topic
+                if (newTopic) {
+                    topics.set(channel, newTopic.trim());
+
+                    for (const member of channels.get(channel)!) {
+                        member.write(
+                            `:${nick}!${username}@localhost TOPIC ${channel} :${newTopic}\r\n`
+                        );
+                    }
+                } else {
+                    // show topic
+                    const topic = topics.get(channel);
+
+                    if (topic) {
+                        send(`:irc-server 332 ${nick} ${channel} :${topic}`);
+                    } else {
+                        send(`:irc-server 331 ${nick} ${channel} :No topic is set`);
+                    }
+                }
             }
 
             if (line.startsWith("PRIVMSG ")) {
