@@ -6,7 +6,17 @@ const server = net.createServer((socket) => {
     socket.write(":irc-server NOTICE * :Serbus from my IRC server\r\n");
 
     socket.on("data", (data) => {
-        console.log("received:", data.toString());
+        const lines = data.toString().split("\r\n");
+
+        for (const line of lines) {
+            if (!line) continue;
+
+            console.log("received:", line);
+
+            if (line.startsWith("PING")) {
+                socket.write("PONG :irc-server\r\n");
+            }
+        }
     });
 
     socket.on("close", () => {
