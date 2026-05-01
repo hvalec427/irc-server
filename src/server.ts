@@ -9,6 +9,7 @@ const inviteOnlyChannels = new Set<string>();
 const channelInvites = new Map<string, Set<string>>();
 const channelKeys = new Map<string, string>();
 const channelLimits = new Map<string, number>();
+const topicProtectedChannels = new Set<string>();
 
 const server = net.createServer((socket) => {
     let nick = "";
@@ -242,7 +243,15 @@ const server = net.createServer((socket) => {
 
                     const ops = channelOperators.get(target);
 
-                    if ((mode === "+i" || mode === "-i" || mode === "+o" || mode === "+k" || mode === "-k" || mode === "+l" || mode === "-l") && !ops?.has(socket)) {
+                    if ((mode === "+i" ||
+                        mode === "-i" ||
+                        mode === "+o" ||
+                        mode === "+k" ||
+                        mode === "-k" ||
+                        mode === "+l" ||
+                        mode === "-l" ||
+                        mode === "+t" ||
+                        mode === "-t") && !ops?.has(socket)) {
                         send(`:irc-server 482 ${nick} ${target} :You're not channel operator`);
                         continue;
                     }
@@ -373,11 +382,32 @@ const server = net.createServer((socket) => {
                         continue;
                     }
 
+                    if (mode === "+t") {
+                        topicProtectedChannels.add(target);
+
+                        for (const member of channels.get(target)!) {
+                            member.write(`:${nick}!${username}@localhost MODE ${target} +t\r\n`);
+                        }
+
+                        continue;
+                    }
+
+                    if (mode === "-t") {
+                        topicProtectedChannels.delete(target);
+
+                        for (const member of channels.get(target)!) {
+                            member.write(`:${nick}!${username}@localhost MODE ${target} -t\r\n`);
+                        }
+
+                        continue;
+                    }
+
                     let modes = "";
 
                     if (inviteOnlyChannels.has(target)) modes += "i";
                     if (channelKeys.has(target)) modes += "k";
                     if (channelLimits.has(target)) modes += "l";
+                    if (topicProtectedChannels.has(target)) modes += "t";
 
                     send(`:irc-server 324 ${nick} ${target} +${modes}`);
                 }
@@ -427,6 +457,7 @@ const server = net.createServer((socket) => {
                 send(`:irc-server 323 ${nick} :End of /LIST`);
             }
 
+
             if (line.startsWith("TOPIC ")) {
                 const channel = line.split(" ")[1];
                 const newTopic = line.split(" :")[1]?.trim();
@@ -446,8 +477,9 @@ const server = net.createServer((socket) => {
                     continue;
                 }
 
+                // only restrict topic change if +t is enabled
                 if (newTopic) {
-                    if (!ops?.has(socket)) {
+                    if (topicProtectedChannels.has(channel) && !ops?.has(socket)) {
                         send(`:irc-server 482 ${nick} ${channel} :You're not channel operator`);
                         continue;
                     }
@@ -455,16 +487,19 @@ const server = net.createServer((socket) => {
                     topics.set(channel, newTopic);
 
                     for (const member of members) {
-                        member.write(`:${nick}!${username}@localhost TOPIC ${channel} :${newTopic}\r\n`);
+                        member.write(
+                            `:${nick}!${username}@localhost TOPIC ${channel} :${newTopic}\r\n`
+                        );
                     }
-                } else {
-                    const topic = topics.get(channel);
+                    continue;
+                }
 
-                    if (topic) {
-                        send(`:irc-server 332 ${nick} ${channel} :${topic}`);
-                    } else {
-                        send(`:irc-server 331 ${nick} ${channel} :No topic is set`);
-                    }
+                const topic = topics.get(channel);
+
+                if (topic) {
+                    send(`:irc-server 332 ${nick} ${channel} :${topic}`);
+                } else {
+                    send(`:irc-server 331 ${nick} ${channel} :No topic is set`);
                 }
             }
 
