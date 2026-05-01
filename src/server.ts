@@ -10,6 +10,7 @@ const server = net.createServer((socket) => {
     let username = "";
     let realname = "";
     let registered = false;
+    let awayMessage = "";
 
     function send(line: string) {
         socket.write(line + "\r\n");
@@ -86,28 +87,19 @@ const server = net.createServer((socket) => {
                 tryRegister();
             }
 
-            if (line.startsWith("NOTICE ")) {
-                const target = line.split(" ")[1];
-                const message = line.split(" :")[1];
+            if (line.startsWith("AWAY")) {
+                const message = line.split(" :")[1]?.trim();
 
-                if (!target || !message) continue;
+                if (message) {
+                    awayMessage = message;
+                    (socket as any).awayMessage = awayMessage;
 
-                if (target.startsWith("#")) {
-                    const members = channels.get(target);
-                    if (!members) continue;
-
-                    for (const member of members) {
-                        member.write(
-                            `:${nick}!${username}@localhost NOTICE ${target} :${message}\r\n`
-                        );
-                    }
+                    send(`:irc-server 306 ${nick} :You have been marked as being away`);
                 } else {
-                    const recipient = clientsByNick.get(target);
-                    if (!recipient) continue;
+                    awayMessage = "";
+                    (socket as any).awayMessage = "";
 
-                    recipient.write(
-                        `:${nick}!${username}@localhost NOTICE ${target} :${message}\r\n`
-                    );
+                    send(`:irc-server 305 ${nick} :You are no longer marked as being away`);
                 }
             }
 
@@ -277,7 +269,37 @@ const server = net.createServer((socket) => {
                     }
 
                     recipient.write(`:${nick}!${username}@localhost PRIVMSG ${target} :${message}\r\n`);
+                    const awayMessage = (recipient as any).awayMessage ?? "";
+
+                    if (awayMessage) {
+                        send(`:irc-server 301 ${nick} ${target} :${awayMessage}`);
+                    }
                     send(`:${nick}!${username}@localhost PRIVMSG ${target} :${message}`);
+                }
+            }
+
+            if (line.startsWith("NOTICE ")) {
+                const target = line.split(" ")[1];
+                const message = line.split(" :")[1];
+
+                if (!target || !message) continue;
+
+                if (target.startsWith("#")) {
+                    const members = channels.get(target);
+                    if (!members) continue;
+
+                    for (const member of members) {
+                        member.write(
+                            `:${nick}!${username}@localhost NOTICE ${target} :${message}\r\n`
+                        );
+                    }
+                } else {
+                    const recipient = clientsByNick.get(target);
+                    if (!recipient) continue;
+
+                    recipient.write(
+                        `:${nick}!${username}@localhost NOTICE ${target} :${message}\r\n`
+                    );
                 }
             }
 
@@ -296,7 +318,13 @@ const server = net.createServer((socket) => {
                 const username = (client as any).username ?? "unknown";
                 const realname = (client as any).realname ?? "unknown";
 
+
                 send(`:irc-server 311 ${nick} ${target} ${username} localhost * :${realname}`);
+                const awayMessage = (client as any).awayMessage ?? "";
+
+                if (awayMessage) {
+                    send(`:irc-server 301 ${nick} ${target} :${awayMessage}`);
+                }
                 send(`:irc-server 318 ${nick} ${target} :End of WHOIS list`);
             }
 
