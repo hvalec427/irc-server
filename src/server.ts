@@ -356,26 +356,35 @@ const server = net.createServer((socket) => {
 
             if (line.startsWith("TOPIC ")) {
                 const channel = line.split(" ")[1];
-                const newTopic = line.split(" :")[1];
+                const newTopic = line.split(" :")[1]?.trim();
 
                 if (!channel) continue;
 
-                if (!channels.has(channel)) {
+                const members = channels.get(channel);
+                const ops = channelOperators.get(channel);
+
+                if (!members) {
                     send(`:irc-server 403 ${nick} ${channel} :No such channel`);
                     continue;
                 }
 
-                // set topic
-                if (newTopic) {
-                    topics.set(channel, newTopic.trim());
+                if (!members.has(socket)) {
+                    send(`:irc-server 442 ${nick} ${channel} :You're not on that channel`);
+                    continue;
+                }
 
-                    for (const member of channels.get(channel)!) {
-                        member.write(
-                            `:${nick}!${username}@localhost TOPIC ${channel} :${newTopic}\r\n`
-                        );
+                if (newTopic) {
+                    if (!ops?.has(socket)) {
+                        send(`:irc-server 482 ${nick} ${channel} :You're not channel operator`);
+                        continue;
+                    }
+
+                    topics.set(channel, newTopic);
+
+                    for (const member of members) {
+                        member.write(`:${nick}!${username}@localhost TOPIC ${channel} :${newTopic}\r\n`);
                     }
                 } else {
-                    // show topic
                     const topic = topics.get(channel);
 
                     if (topic) {
