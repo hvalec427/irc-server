@@ -457,6 +457,32 @@ const server = net.createServer((socket) => {
                 send(`:irc-server 323 ${nick} :End of /LIST`);
             }
 
+            if (line.startsWith("WHO ")) {
+                const target = line.split(" ")[1]?.trim();
+
+                if (!target || !target.startsWith("#")) {
+                    continue;
+                }
+
+                const members = channels.get(target);
+
+                if (!members) {
+                    send(`:irc-server 403 ${nick} ${target} :No such channel`);
+                    continue;
+                }
+
+                for (const member of members) {
+                    const memberNick = (member as any).nick;
+                    const memberUsername = (member as any).username;
+                    const memberRealname = (member as any).realname;
+
+                    send(
+                        `:irc-server 352 ${nick} ${target} ${memberUsername} localhost irc-server ${memberNick} H :0 ${memberRealname}`
+                    );
+                }
+
+                send(`:irc-server 315 ${nick} ${target} :End of WHO list`);
+            }
 
             if (line.startsWith("TOPIC ")) {
                 const channel = line.split(" ")[1];
