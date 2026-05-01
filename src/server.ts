@@ -1,4 +1,8 @@
+import "dotenv/config";
+
 import net from "net";
+
+const ENABLE_KEEPALIVE = process.env.ENABLE_KEEPALIVE === "true";
 
 const usedNicks = new Set<string>();
 const channels = new Map<string, Set<net.Socket>>();
@@ -17,6 +21,23 @@ const server = net.createServer((socket) => {
     let realname = "";
     let registered = false;
     let awayMessage = "";
+    let lastActivity = Date.now();
+
+    if (ENABLE_KEEPALIVE) {
+        const interval = setInterval(() => {
+            if (Date.now() - lastActivity > 60_000) {
+                socket.end();
+                clearInterval(interval);
+                return;
+            }
+
+            socket.write("PING :irc-server\r\n");
+        }, 30_000);
+
+        socket.on("close", () => {
+            clearInterval(interval);
+        });
+    }
 
     function send(line: string) {
         socket.write(line + "\r\n");
@@ -32,6 +53,7 @@ const server = net.createServer((socket) => {
     console.log("client connected");
 
     socket.on("data", (data) => {
+        lastActivity = Date.now();
         const lines = data.toString().split("\r\n");
 
         for (const line of lines) {
@@ -45,6 +67,10 @@ const server = net.createServer((socket) => {
                 } else {
                     send("PONG :irc-server");
                 }
+            }
+
+            if (line.startsWith("PONG")) {
+                lastActivity = Date.now();
             }
 
             if (line.trim() === "MOTD") {
