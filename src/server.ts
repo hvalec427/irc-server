@@ -251,6 +251,35 @@ const server = net.createServer((socket) => {
                 send(`:irc-server 311 ${nick} ${target} ${username} localhost * :${realname}`);
                 send(`:irc-server 318 ${nick} ${target} :End of WHOIS list`);
             }
+
+            if (line.startsWith("QUIT")) {
+                const message = line.split(" :")[1] ?? "Client quit";
+
+                for (const [channel, members] of channels) {
+                    if (members.has(socket)) {
+                        for (const member of members) {
+                            if (member !== socket) {
+                                member.write(
+                                    `:${nick}!${username}@localhost QUIT :${message}\r\n`
+                                );
+                            }
+                        }
+
+                        members.delete(socket);
+
+                        if (members.size === 0) {
+                            channels.delete(channel);
+                        }
+                    }
+                }
+
+                if (nick) {
+                    usedNicks.delete(nick);
+                    clientsByNick.delete(nick);
+                }
+
+                socket.end();
+            }
         }
     });
 
