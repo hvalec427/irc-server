@@ -40,6 +40,12 @@ const server = net.createServer((socket) => {
                 }
             }
 
+            if (line.trim() === "MOTD") {
+                send(`:irc-server 375 ${nick} :- irc-server Message of the Day -`);
+                send(`:irc-server 372 ${nick} :- Serbus, welcome to my tiny IRC server`);
+                send(`:irc-server 376 ${nick} :End of /MOTD command`);
+            }
+
             if (line.startsWith("NICK ")) {
                 const requestedNick = line.split(" ")[1].trim();
 
