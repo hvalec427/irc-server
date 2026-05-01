@@ -111,6 +111,23 @@ const server = net.createServer((socket) => {
                 send(`:irc-server 366 ${nick} ${channel} :End of /NAMES list`);
             }
 
+            if (line.startsWith("MODE ")) {
+                const target = line.split(" ")[1]?.trim();
+
+                if (!target) continue;
+
+                if (target.startsWith("#")) {
+                    if (!channels.has(target)) {
+                        send(`:irc-server 403 ${nick} ${target} :No such channel`);
+                        continue;
+                    }
+
+                    send(`:irc-server 324 ${nick} ${target} +`);
+                } else {
+                    send(`:irc-server 221 ${nick} +`);
+                }
+            }
+
             if (line.startsWith("PART ")) {
                 const channel = line.split(" ")[1]?.trim();
 
