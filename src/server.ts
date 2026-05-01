@@ -86,6 +86,31 @@ const server = net.createServer((socket) => {
                 tryRegister();
             }
 
+            if (line.startsWith("NOTICE ")) {
+                const target = line.split(" ")[1];
+                const message = line.split(" :")[1];
+
+                if (!target || !message) continue;
+
+                if (target.startsWith("#")) {
+                    const members = channels.get(target);
+                    if (!members) continue;
+
+                    for (const member of members) {
+                        member.write(
+                            `:${nick}!${username}@localhost NOTICE ${target} :${message}\r\n`
+                        );
+                    }
+                } else {
+                    const recipient = clientsByNick.get(target);
+                    if (!recipient) continue;
+
+                    recipient.write(
+                        `:${nick}!${username}@localhost NOTICE ${target} :${message}\r\n`
+                    );
+                }
+            }
+
             if (line.startsWith("JOIN ")) {
                 const channel = line.split(" ")[1].trim();
 
