@@ -199,6 +199,20 @@ const server = net.createServer((socket) => {
             clientsByNick.delete(nick);
         }
 
+        for (const [channel, members] of channels) {
+            if (members.has(socket)) {
+                members.delete(socket);
+
+                for (const member of members) {
+                    member.write(`:${nick}!${username}@localhost QUIT :Client disconnected\r\n`);
+                }
+
+                if (members.size === 0) {
+                    channels.delete(channel);
+                }
+            }
+        }
+
         console.log(`${nick || "client"} disconnected`);
     });
 });
