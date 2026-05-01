@@ -1,6 +1,7 @@
 import net from "net";
 
 const usedNicks = new Set<string>();
+const channels = new Map<string, Set<net.Socket>>();
 
 const server = net.createServer((socket) => {
     let nick = "";
@@ -50,6 +51,7 @@ const server = net.createServer((socket) => {
 
                 nick = requestedNick;
                 usedNicks.add(nick);
+                (socket as any).nick = nick;
 
                 console.log("nickname set to:", nick);
 
@@ -60,6 +62,37 @@ const server = net.createServer((socket) => {
                 username = line.split(" ")[1].trim();
                 console.log("username set to:", username);
                 tryRegister();
+            }
+
+            if (line.startsWith("JOIN ")) {
+                const channel = line.split(" ")[1].trim();
+
+                if (!nick) {
+                    send(":irc-server 451 * :You have not registered");
+                    continue;
+                }
+
+                if (!channel.startsWith("#")) {
+                    send(`:irc-server 403 ${nick} ${channel} :No such channel`);
+                    continue;
+                }
+
+                if (!channels.has(channel)) {
+                    channels.set(channel, new Set());
+                }
+
+                channels.get(channel)!.add(socket);
+                for (const member of channels.get(channel)!) {
+                    member.write(`:${nick}!${username}@localhost JOIN ${channel}\r\n`);
+                }
+                send(`:irc-server 331 ${nick} ${channel} :No topic is set`);
+                const members = [...channels.get(channel)!]
+                    .map((s) => (s as any).nick)
+                    .filter(Boolean)
+                    .join(" ");
+
+                send(`:irc-server 353 ${nick} = ${channel} :${members}`);
+                send(`:irc-server 366 ${nick} ${channel} :End of /NAMES list`);
             }
         }
     });
