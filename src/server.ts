@@ -2,10 +2,12 @@ import net from "net";
 
 const usedNicks = new Set<string>();
 const channels = new Map<string, Set<net.Socket>>();
+const clientsByNick = new Map<string, net.Socket>();
 
 const server = net.createServer((socket) => {
     let nick = "";
     let username = "";
+    let realname = "";
     let registered = false;
 
     function send(line: string) {
@@ -47,10 +49,14 @@ const server = net.createServer((socket) => {
 
                 if (nick) {
                     usedNicks.delete(nick);
+                    clientsByNick.delete(nick);
                 }
 
                 nick = requestedNick;
+
                 usedNicks.add(nick);
+                clientsByNick.set(nick, socket);
+
                 (socket as any).nick = nick;
 
                 console.log("nickname set to:", nick);
@@ -59,8 +65,17 @@ const server = net.createServer((socket) => {
             }
 
             if (line.startsWith("USER ")) {
-                username = line.split(" ")[1].trim();
+                const parts = line.split(" ");
+
+                username = parts[1].trim();
+                realname = line.split(" :")[1]?.trim() ?? "";
+
                 console.log("username set to:", username);
+                console.log("realname set to:", realname);
+
+                (socket as any).username = username;
+                (socket as any).realname = realname;
+
                 tryRegister();
             }
 
@@ -125,12 +140,32 @@ const server = net.createServer((socket) => {
                     }
                 }
             }
+
+            if (line.startsWith("WHOIS ")) {
+                const target = line.split(" ")[1]?.trim();
+
+                if (!target) continue;
+
+                const client = clientsByNick.get(target);
+
+                if (!client) {
+                    send(`:irc-server 401 ${nick} ${target} :No such nick`);
+                    continue;
+                }
+
+                const username = (client as any).username ?? "unknown";
+                const realname = (client as any).realname ?? "unknown";
+
+                send(`:irc-server 311 ${nick} ${target} ${username} localhost * :${realname}`);
+                send(`:irc-server 318 ${nick} ${target} :End of WHOIS list`);
+            }
         }
     });
 
     socket.on("close", () => {
         if (nick) {
             usedNicks.delete(nick);
+            clientsByNick.delete(nick);
         }
 
         console.log(`${nick || "client"} disconnected`);
