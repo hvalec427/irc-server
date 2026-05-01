@@ -7,6 +7,7 @@ const topics = new Map<string, string>();
 const channelOperators = new Map<string, Set<net.Socket>>();
 const inviteOnlyChannels = new Set<string>();
 const channelInvites = new Map<string, Set<string>>();
+const channelKeys = new Map<string, string>();
 
 const server = net.createServer((socket) => {
     let nick = "";
@@ -107,7 +108,9 @@ const server = net.createServer((socket) => {
             }
 
             if (line.startsWith("JOIN ")) {
-                const channel = line.split(" ")[1].trim();
+                const parts = line.split(" ");
+                const channel = parts[1]?.trim();
+                const providedKey = parts[2]?.trim();
 
                 if (!nick) {
                     send(":irc-server 451 * :You have not registered");
@@ -130,9 +133,16 @@ const server = net.createServer((socket) => {
                         send(`:irc-server 473 ${nick} ${channel} :Cannot join channel (+i)`);
                         continue;
                     }
-
-                    invites.delete(nick);
                 }
+
+                const requiredKey = channelKeys.get(channel);
+
+                if (requiredKey && providedKey !== requiredKey) {
+                    send(`:irc-server 475 ${nick} ${channel} :Cannot join channel (+k)`);
+                    continue;
+                }
+
+                channelInvites.get(channel)?.delete(nick);
 
                 channels.get(channel)!.add(socket);
                 if (!channelOperators.has(channel)) {
@@ -224,7 +234,7 @@ const server = net.createServer((socket) => {
 
                     const ops = channelOperators.get(target);
 
-                    if ((mode === "+i" || mode === "-i" || mode === "+o") && !ops?.has(socket)) {
+                    if ((mode === "+i" || mode === "-i" || mode === "+o" || mode === "+k" || mode === "-k") && !ops?.has(socket)) {
                         send(`:irc-server 482 ${nick} ${target} :You're not channel operator`);
                         continue;
                     }
@@ -306,7 +316,35 @@ const server = net.createServer((socket) => {
                         continue;
                     }
 
-                    send(`:irc-server 324 ${nick} ${target} ${inviteOnlyChannels.has(target) ? "+i" : "+"}`);
+                    if (mode === "+k") {
+                        const key = parts[3]?.trim();
+                        if (!key) continue;
+
+                        channelKeys.set(target, key);
+
+                        for (const member of channels.get(target)!) {
+                            member.write(`:${nick}!${username}@localhost MODE ${target} +k ${key}\r\n`);
+                        }
+
+                        continue;
+                    }
+
+                    if (mode === "-k") {
+                        channelKeys.delete(target);
+
+                        for (const member of channels.get(target)!) {
+                            member.write(`:${nick}!${username}@localhost MODE ${target} -k\r\n`);
+                        }
+
+                        continue;
+                    }
+
+                    let modes = "";
+
+                    if (inviteOnlyChannels.has(target)) modes += "i";
+                    if (channelKeys.has(target)) modes += "k";
+
+                    send(`:irc-server 324 ${nick} ${target} +${modes}`);
                 }
             }
 
