@@ -180,6 +180,16 @@ const server = net.createServer((socket) => {
 
                 members.delete(socket);
 
+                const ops = channelOperators.get(channel);
+
+                if (ops && ops.size === 0 && members.size > 0) {
+                    const iterator = members.values().next();
+
+                    if (!iterator.done) {
+                        ops.add(iterator.value);
+                    }
+                }
+
                 if (members.size === 0) {
                     channels.delete(channel);
                 }
@@ -228,6 +238,55 @@ const server = net.createServer((socket) => {
                 }
             }
 
+            if (line.startsWith("KICK ")) {
+                const parts = line.split(" ");
+                const channel = parts[1]?.trim();
+                const targetNick = parts[2]?.trim();
+                const reason = line.split(" :")[1]?.trim() ?? "Kicked";
+
+                if (!channel || !targetNick) continue;
+
+                const members = channels.get(channel);
+                const operators = channelOperators.get(channel);
+
+                if (!members || !members.has(socket)) {
+                    send(`:irc-server 442 ${nick} ${channel} :You're not on that channel`);
+                    continue;
+                }
+
+                if (!operators?.has(socket)) {
+                    send(`:irc-server 482 ${nick} ${channel} :You're not channel operator`);
+                    continue;
+                }
+
+                const targetSocket = clientsByNick.get(targetNick);
+
+                if (!targetSocket || !members.has(targetSocket)) {
+                    send(`:irc-server 441 ${nick} ${targetNick} ${channel} :They aren't on that channel`);
+                    continue;
+                }
+
+                for (const member of members) {
+                    member.write(`:${nick}!${username}@localhost KICK ${channel} ${targetNick} :${reason}\r\n`);
+                }
+
+                members.delete(targetSocket);
+
+                const ops = channelOperators.get(channel);
+
+                if (ops) {
+                    ops.delete(targetSocket);
+
+                    if (ops.size === 0 && members.size > 0) {
+                        const iterator = members.values().next();
+
+                        if (!iterator.done) {
+                            ops.add(iterator.value);
+                        }
+                    }
+                }
+            }
+
             if (line.startsWith("NAMES")) {
                 const channel = line.split(" ")[1]?.trim();
 
@@ -240,7 +299,7 @@ const server = net.createServer((socket) => {
                     .map((s) => {
                         const isOp = channelOperators.get(channel)?.has(s);
                         return (isOp ? "@" : "") + (s as any).nick;
-                    }).map((s) => (s as any).nick)
+                    })
                     .filter(Boolean)
                     .join(" ");
 
@@ -266,6 +325,11 @@ const server = net.createServer((socket) => {
 
                     if (!members) {
                         send(`:irc-server 403 ${nick} ${target} :No such channel`);
+                        continue;
+                    }
+
+                    if (!members.has(socket)) {
+                        send(`:irc-server 442 ${nick} ${target} :You're not on that channel`);
                         continue;
                     }
 
@@ -364,7 +428,19 @@ const server = net.createServer((socket) => {
                             }
                         }
 
-                        members.delete(socket);
+                        const ops = channelOperators.get(channel);
+
+                        if (ops) {
+                            ops.delete(socket);
+
+                            if (ops.size === 0 && members.size > 0) {
+                                const iterator = members.values().next();
+
+                                if (!iterator.done) {
+                                    ops.add(iterator.value);
+                                }
+                            }
+                        }
 
                         if (members.size === 0) {
                             channels.delete(channel);
