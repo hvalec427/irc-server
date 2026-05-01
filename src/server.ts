@@ -1,11 +1,24 @@
 import net from "net";
 
+const usedNicks = new Set<string>();
+
 const server = net.createServer((socket) => {
     let nick = "";
+    let username = "";
+    let registered = false;
+
+    function send(line: string) {
+        socket.write(line + "\r\n");
+    }
+
+    function tryRegister() {
+        if (!registered && nick && username) {
+            registered = true;
+            send(`:irc-server 001 ${nick} :Serbus to my irc-server`);
+        }
+    }
 
     console.log("client connected");
-
-    socket.write(":irc-server NOTICE * :Serbus from my IRC server\r\n");
 
     socket.on("data", (data) => {
         const lines = data.toString().split("\r\n");
@@ -17,22 +30,45 @@ const server = net.createServer((socket) => {
 
             if (line.startsWith("PING")) {
                 if (nick) {
-                    socket.write(`PONG ${nick}\r\n`);
+                    send(`PONG ${nick}`);
                 } else {
-                    socket.write("PONG :irc-server\r\n");
+                    send("PONG :irc-server");
                 }
             }
 
             if (line.startsWith("NICK ")) {
-                nick = line.split(" ")[1];
+                const requestedNick = line.split(" ")[1].trim();
+
+                if (usedNicks.has(requestedNick)) {
+                    send(`:irc-server 433 * ${requestedNick} :Nickname already in use`);
+                    continue;
+                }
+
+                if (nick) {
+                    usedNicks.delete(nick);
+                }
+
+                nick = requestedNick;
+                usedNicks.add(nick);
+
                 console.log("nickname set to:", nick);
 
-                socket.write(`:irc-server NOTICE ${nick} :Nickname set to ${nick}\r\n`);
+                tryRegister();
+            }
+
+            if (line.startsWith("USER ")) {
+                username = line.split(" ")[1].trim();
+                console.log("username set to:", username);
+                tryRegister();
             }
         }
     });
 
     socket.on("close", () => {
+        if (nick) {
+            usedNicks.delete(nick);
+        }
+
         console.log(`${nick || "client"} disconnected`);
     });
 });
