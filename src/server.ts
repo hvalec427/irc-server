@@ -177,6 +177,23 @@ const server = net.createServer((socket) => {
                 }
             }
 
+            if (line.startsWith("NAMES")) {
+                const channel = line.split(" ")[1]?.trim();
+
+                if (!channel || !channels.has(channel)) {
+                    send(`:irc-server 366 ${nick} ${channel ?? "*"} :End of /NAMES list`);
+                    continue;
+                }
+
+                const members = [...channels.get(channel)!]
+                    .map((s) => (s as any).nick)
+                    .filter(Boolean)
+                    .join(" ");
+
+                send(`:irc-server 353 ${nick} = ${channel} :${members}`);
+                send(`:irc-server 366 ${nick} ${channel} :End of /NAMES list`);
+            }
+
             if (line.startsWith("PRIVMSG ")) {
                 const target = line.split(" ")[1];
                 const message = line.split(" :")[1];
