@@ -222,6 +222,13 @@ const server = net.createServer((socket) => {
                         continue;
                     }
 
+                    const ops = channelOperators.get(target);
+
+                    if ((mode === "+i" || mode === "-i" || mode === "+o") && !ops?.has(socket)) {
+                        send(`:irc-server 482 ${nick} ${target} :You're not channel operator`);
+                        continue;
+                    }
+
                     if (mode === "+i") {
                         inviteOnlyChannels.add(target);
                         send(`:${nick}!${username}@localhost MODE ${target} +i`);
@@ -231,6 +238,71 @@ const server = net.createServer((socket) => {
                     if (mode === "-i") {
                         inviteOnlyChannels.delete(target);
                         send(`:${nick}!${username}@localhost MODE ${target} -i`);
+                        continue;
+                    }
+
+                    if (mode === "+o") {
+                        const targetNick = parts[3]?.trim();
+
+                        if (!targetNick) continue;
+
+                        if (!ops?.has(socket)) {
+                            send(`:irc-server 482 ${nick} ${target} :You're not channel operator`);
+                            continue;
+                        }
+
+                        const targetSocket = clientsByNick.get(targetNick);
+
+                        if (!targetSocket || !channels.get(target)?.has(targetSocket)) {
+                            send(`:irc-server 441 ${nick} ${targetNick} ${target} :They aren't on that channel`);
+                            continue;
+                        }
+
+                        ops.add(targetSocket);
+
+                        for (const member of channels.get(target)!) {
+                            member.write(
+                                `:${nick}!${username}@localhost MODE ${target} +o ${targetNick}\r\n`
+                            );
+                        }
+
+                        continue;
+                    }
+
+                    if (mode === "-o") {
+                        const targetNick = parts[3]?.trim();
+
+                        if (!targetNick) continue;
+
+                        const ops = channelOperators.get(target);
+
+                        if (!ops?.has(socket)) {
+                            send(`:irc-server 482 ${nick} ${target} :You're not channel operator`);
+                            continue;
+                        }
+
+                        const targetSocket = clientsByNick.get(targetNick);
+
+                        if (!targetSocket || !channels.get(target)?.has(targetSocket)) {
+                            send(`:irc-server 441 ${nick} ${targetNick} ${target} :They aren't on that channel`);
+                            continue;
+                        }
+
+                        ops.delete(targetSocket);
+
+                        // prevent removing the last operator
+                        if (ops.size === 0) {
+                            ops.add(targetSocket);
+                            send(`:irc-server 482 ${nick} ${target} :Cannot remove last operator`);
+                            continue;
+                        }
+
+                        for (const member of channels.get(target)!) {
+                            member.write(
+                                `:${nick}!${username}@localhost MODE ${target} -o ${targetNick}\r\n`
+                            );
+                        }
+
                         continue;
                     }
 
