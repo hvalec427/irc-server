@@ -132,9 +132,9 @@ const server = net.createServer((socket) => {
                     }
 
                     for (const member of members) {
-                        if (member !== socket) {
-                            member.write(`:${nick}!${username}@localhost PRIVMSG ${target} :${message}\r\n`);
-                        }
+                        member.write(
+                            `:${nick}!${username}@localhost PRIVMSG ${target} :${message}\r\n`
+                        );
                     }
                 } else {
                     const recipient = clientsByNick.get(target);
@@ -145,6 +145,7 @@ const server = net.createServer((socket) => {
                     }
 
                     recipient.write(`:${nick}!${username}@localhost PRIVMSG ${target} :${message}\r\n`);
+                    send(`:${nick}!${username}@localhost PRIVMSG ${target} :${message}`);
                 }
             }
 
