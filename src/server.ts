@@ -4,6 +4,7 @@ const usedNicks = new Set<string>();
 const channels = new Map<string, Set<net.Socket>>();
 const clientsByNick = new Map<string, net.Socket>();
 const topics = new Map<string, string>();
+const channelOperators = new Map<string, Set<net.Socket>>();
 
 const server = net.createServer((socket) => {
     let nick = "";
@@ -121,12 +122,22 @@ const server = net.createServer((socket) => {
                 }
 
                 channels.get(channel)!.add(socket);
+                if (!channelOperators.has(channel)) {
+                    channelOperators.set(channel, new Set());
+                }
+
+                if (channelOperators.get(channel)!.size === 0) {
+                    channelOperators.get(channel)!.add(socket);
+                }
                 for (const member of channels.get(channel)!) {
                     member.write(`:${nick}!${username}@localhost JOIN ${channel}\r\n`);
                 }
                 send(`:irc-server 331 ${nick} ${channel} :No topic is set`);
                 const members = [...channels.get(channel)!]
-                    .map((s) => (s as any).nick)
+                    .map((s) => {
+                        const isOp = channelOperators.get(channel)?.has(s);
+                        return (isOp ? "@" : "") + (s as any).nick;
+                    })
                     .filter(Boolean)
                     .join(" ");
 
@@ -226,7 +237,10 @@ const server = net.createServer((socket) => {
                 }
 
                 const members = [...channels.get(channel)!]
-                    .map((s) => (s as any).nick)
+                    .map((s) => {
+                        const isOp = channelOperators.get(channel)?.has(s);
+                        return (isOp ? "@" : "") + (s as any).nick;
+                    }).map((s) => (s as any).nick)
                     .filter(Boolean)
                     .join(" ");
 
