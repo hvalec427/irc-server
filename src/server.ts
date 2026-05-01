@@ -133,6 +133,16 @@ const server = net.createServer((socket) => {
                 }
             }
 
+            if (line.trim() === "LIST") {
+                send(`:irc-server 321 ${nick} Channel :Users Name`);
+
+                for (const [channel, members] of channels) {
+                    send(`:irc-server 322 ${nick} ${channel} ${members.size} :No topic`);
+                }
+
+                send(`:irc-server 323 ${nick} :End of /LIST`);
+            }
+
             if (line.startsWith("PRIVMSG ")) {
                 const target = line.split(" ")[1];
                 const message = line.split(" :")[1];
