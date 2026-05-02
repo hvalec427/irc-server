@@ -17,7 +17,6 @@ const channelKeys = new Map<string, string>();
 const channelLimits = new Map<string, number>();
 const topicProtectedChannels = new Set<string>();
 const accounts = new Map<string, string>();
-const authenticatedNicks = new Set<string>();
 
 function parseIrcLine(rawLine: string): { raw: string; command: string; params: string[] } | null {
     let line = rawLine.trim();
@@ -62,17 +61,13 @@ const server = net.createServer((socket) => {
     function canUseNick() {
         if (!nick) return false;
 
-        // if nick isn't registered → allowed
         if (!accounts.has(nick)) return true;
 
-        // if registered → must be logged in
-        return authenticatedNicks.has(nick);
+        return (socket as any).account === nick;
     }
 
     function canSendMessage() {
-        if (!accounts.has(nick)) return true;
-
-        return authenticatedNicks.has(nick);
+        return canUseNick();
     }
 
     if (ENABLE_KEEPALIVE) {
@@ -183,12 +178,14 @@ const server = net.createServer((socket) => {
                     (socket as any).nick = nick;
 
                     if (accounts.has(nick)) {
-                        authenticatedNicks.delete(nick);
+                        delete (socket as any).account;
 
                         send(
                             `:${SERVER_HOSTNAME} NOTICE ${nick} :This nickname is registered. Use AUTH LOGIN <password>`
                         );
                     } else {
+                        delete (socket as any).account;
+
                         send(
                             `:${SERVER_HOSTNAME} NOTICE ${nick} :Nickname ${nick} is not registered. Claim it with AUTH REGISTER <password>`
                         );
@@ -247,7 +244,7 @@ const server = net.createServer((socket) => {
                             }
 
                             accounts.set(nick, password);
-                            authenticatedNicks.add(nick);
+                            (socket as any).account = nick;
 
                             send(`:${SERVER_HOSTNAME} NOTICE ${nick} :Account registered and authenticated as ${nick}`);
                             break;
@@ -265,7 +262,7 @@ const server = net.createServer((socket) => {
                                 continue;
                             }
 
-                            authenticatedNicks.add(nick);
+                            (socket as any).account = nick;
 
                             send(`:${SERVER_HOSTNAME} NOTICE ${nick} :You are now authenticated as ${nick}`);
                             break;
@@ -918,6 +915,9 @@ const server = net.createServer((socket) => {
                     const signonTime = Math.floor(((client as any).signonTime ?? Date.now()) / 1000);
 
                     send(`:${SERVER_HOSTNAME} 311 ${nick} ${target} ${username} ${SERVER_HOSTNAME} * :${realname}`);
+                    if ((client as any).account) {
+                        send(`:${SERVER_HOSTNAME} 330 ${nick} ${target} ${(client as any).account} :is logged in as`);
+                    }
 
                     send(`:${SERVER_HOSTNAME} 312 ${nick} ${target} ${SERVER_HOSTNAME} :IRC server`);
 
@@ -967,7 +967,7 @@ const server = net.createServer((socket) => {
         if (nick) {
             usedNicks.delete(nick);
             clientsByNick.delete(nick);
-            authenticatedNicks.delete(nick);
+            delete (socket as any).account;
         }
 
         const reason = quitReason ?? "Client disconnected";
