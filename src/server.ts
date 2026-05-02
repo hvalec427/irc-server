@@ -1,6 +1,7 @@
 import "dotenv/config";
 
 import net from "net";
+import bcrypt from "bcryptjs";
 import { loadState, saveState, startPeriodicSaving } from "./state";
 
 const ENABLE_KEEPALIVE = process.env.ENABLE_KEEPALIVE === "true";
@@ -131,7 +132,7 @@ const server = net.createServer((socket) => {
 
     console.info("client connected");
 
-    socket.on("data", (data) => {
+    socket.on("data", async (data) => {
         lastActivity = Date.now();
         (socket as any).lastActivity = lastActivity;
         const lines = data.toString().split("\r\n");
@@ -272,7 +273,14 @@ const server = net.createServer((socket) => {
                                 continue;
                             }
 
-                            accounts.set(nick, password);
+                            try {
+                                const hash = await bcrypt.hash(password, 12);
+                                accounts.set(nick, hash);
+                            } catch (error) {
+                                console.error("Failed to hash password:", error);
+                                send(`:${SERVER_HOSTNAME} NOTICE ${nick} :Internal error hashing password`);
+                                continue;
+                            }
                             (socket as any).account = nick;
 
                             send(`:${SERVER_HOSTNAME} NOTICE ${nick} :Account registered and authenticated as ${nick}`);
@@ -286,7 +294,26 @@ const server = net.createServer((socket) => {
                                 continue;
                             }
 
-                            if (savedPassword !== password) {
+                            let authenticated = false;
+                            try {
+                                authenticated = await bcrypt.compare(password, savedPassword);
+                            } catch (error) {
+                                // Likely a legacy plaintext password stored; attempt direct compare
+                                if (savedPassword === password) {
+                                    authenticated = true;
+                                    // Migrate to hashed password
+                                    try {
+                                        const newHash = await bcrypt.hash(password, 12);
+                                        accounts.set(nick, newHash);
+                                    } catch (e) {
+                                        console.error("Failed to migrate plaintext password to hash:", e);
+                                    }
+                                } else {
+                                    authenticated = false;
+                                }
+                            }
+
+                            if (!authenticated) {
                                 send(`:${SERVER_HOSTNAME} NOTICE ${nick} :Invalid password`);
                                 continue;
                             }
