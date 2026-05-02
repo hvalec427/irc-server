@@ -861,7 +861,7 @@ const server = net.createServer((socket) => {
                         }
                     }
 
-                    if (members.size === 0) {
+                    if (members.size === 0 && !persistableChannels.has(channel)) {
                         channels.delete(channel);
                     }
                     break;
