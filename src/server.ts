@@ -82,11 +82,14 @@ const server = net.createServer((socket) => {
     let realname = "";
     let registered = false;
     let awayMessage = "";
-    let lastActivity = Date.now();
 
     (socket as any).channels = new Set<string>();
     (socket as any).signonTime = Date.now();
-    (socket as any).lastActivity = lastActivity;
+    // Track two separate timestamps:
+    // - lastSeen: any inbound data (for keepalive/liveness)
+    // - lastActivity: meaningful user actions (for WHOIS idle)
+    (socket as any).lastSeen = Date.now();
+    (socket as any).lastActivity = Date.now();
 
     function canUseNick() {
         if (!nick) return false;
@@ -106,7 +109,8 @@ const server = net.createServer((socket) => {
 
     if (ENABLE_KEEPALIVE) {
         const interval = setInterval(() => {
-            if (Date.now() - lastActivity > 60_000) {
+            // Use lastSeen for liveness so automatic PING/PONG doesn't affect idle time
+            if (Date.now() - (socket as any).lastSeen > 60_000) {
                 socket.end();
                 clearInterval(interval);
                 return;
@@ -154,8 +158,9 @@ const server = net.createServer((socket) => {
     console.info("client connected");
 
     socket.on("data", async (data) => {
-        lastActivity = Date.now();
-        (socket as any).lastActivity = lastActivity;
+        const now = Date.now();
+        // Any inbound data counts as "seen" for liveness
+        (socket as any).lastSeen = now;
         const lines = data.toString().split("\r\n");
 
         for (const rawLine of lines) {
@@ -166,6 +171,12 @@ const server = net.createServer((socket) => {
             const { command, params } = parsed;
 
             console.info("received:", line);
+
+            // Only treat actual user messages as activity for idle tracking
+            const activityCommands = new Set(["PRIVMSG", "NOTICE"]);
+            if (activityCommands.has(command)) {
+                (socket as any).lastActivity = now;
+            }
 
             switch (command) {
                 case "PING": {
@@ -178,7 +189,8 @@ const server = net.createServer((socket) => {
                 }
 
                 case "PONG": {
-                    lastActivity = Date.now();
+                    // PONG keeps the connection alive but shouldn't reset idle
+                    (socket as any).lastSeen = Date.now();
                     break;
                 }
 
@@ -246,16 +258,19 @@ const server = net.createServer((socket) => {
                         if (!(socket as any).writableEnded && !socket.destroyed && socket.writable) {
                             socket.write(nickLine);
                         }
-                        // Send to members of any shared channels
                         const joined = ((socket as any).channels ?? new Set<string>()) as Set<string>;
+                        const recipients = new Set<net.Socket>();
                         for (const ch of joined) {
                             const members = channels.get(ch);
                             if (!members) continue;
                             for (const member of members) {
                                 if (member === socket) continue;
-                                if ((member as any).writableEnded || member.destroyed || !member.writable) continue;
-                                member.write(nickLine);
+                                recipients.add(member);
                             }
+                        }
+                        for (const member of recipients) {
+                            if ((member as any).writableEnded || member.destroyed || !member.writable) continue;
+                            member.write(nickLine);
                         }
                     }
 
