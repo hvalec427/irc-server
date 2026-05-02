@@ -219,14 +219,45 @@ const server = net.createServer((socket) => {
                         continue;
                     }
 
-                    if (nick) {
-                        usedNicks.delete(nick);
-                        clientsByNick.delete(nick);
+                    const oldNick = nick;
+                    if (oldNick) {
+                        usedNicks.delete(oldNick);
+                        clientsByNick.delete(oldNick);
                     }
                     nick = requestedNick;
                     usedNicks.add(nick);
                     clientsByNick.set(nick, socket);
                     (socket as any).nick = nick;
+
+                    // If this is a mid-session nick change, broadcast it and update operator maps
+                    if (oldNick) {
+                        // Update channel operator name sets to keep permissions with the new nick
+                        for (const [ch, names] of channelOperatorNames) {
+                            if (names?.has(oldNick)) {
+                                names.delete(oldNick);
+                                names.add(nick);
+                            }
+                        }
+
+                        const prefix = `${oldNick}!${username}@${SERVER_HOSTNAME}`;
+                        const nickLine = `:${prefix} NICK :${nick}\r\n`;
+
+                        // Send to self
+                        if (!(socket as any).writableEnded && !socket.destroyed && socket.writable) {
+                            socket.write(nickLine);
+                        }
+                        // Send to members of any shared channels
+                        const joined = ((socket as any).channels ?? new Set<string>()) as Set<string>;
+                        for (const ch of joined) {
+                            const members = channels.get(ch);
+                            if (!members) continue;
+                            for (const member of members) {
+                                if (member === socket) continue;
+                                if ((member as any).writableEnded || member.destroyed || !member.writable) continue;
+                                member.write(nickLine);
+                            }
+                        }
+                    }
 
                     if (accounts.has(nick)) {
                         delete (socket as any).account;
@@ -270,6 +301,27 @@ const server = net.createServer((socket) => {
                     (socket as any).username = username;
                     (socket as any).realname = realname;
                     tryRegister();
+                    break;
+                }
+
+                case "SETNAME": {
+                    const newRealname = params[0]?.trim();
+
+                    if (!newRealname) {
+                        send(`:${SERVER_HOSTNAME} 461 ${nick || '*'} SETNAME :Not enough parameters`);
+                        break;
+                    }
+
+                    realname = newRealname;
+                    (socket as any).realname = realname;
+
+                    if (registered) {
+                        send(`:${SERVER_HOSTNAME} NOTICE ${nick || '*'} :Your real name is now ${realname}`);
+                    } else {
+                        // If not yet registered, this may complete registration
+                        tryRegister();
+                    }
+
                     break;
                 }
 
@@ -1103,7 +1155,7 @@ const server = net.createServer((socket) => {
             }
 
             if (![
-                "PING", "PONG", "MOTD", "CAP", "NICK", "USER", "AUTH", "AWAY", "ISON", "JOIN", "INVITE", "MODE", "PART", "LIST", "WHO", "TOPIC", "KICK", "NAMES", "PRIVMSG", "NOTICE", "WHOIS", "LUSERS", "QUIT"
+                "PING", "PONG", "MOTD", "CAP", "NICK", "USER", "SETNAME", "AUTH", "AWAY", "ISON", "JOIN", "INVITE", "MODE", "PART", "LIST", "WHO", "TOPIC", "KICK", "NAMES", "PRIVMSG", "NOTICE", "WHOIS", "LUSERS", "QUIT"
             ].includes(command)) {
                 send(`:${SERVER_HOSTNAME} 421 ${nick || '*'} ${command} :Unknown command`);
             }
