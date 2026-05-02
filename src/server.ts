@@ -194,6 +194,61 @@ const server = net.createServer((socket) => {
                     break;
                 }
 
+                case "HELP": {
+                    if (!nick) {
+                        send(`:${SERVER_HOSTNAME} 451 * :You must set NICK first`);
+                        break;
+                    }
+
+                    const topic = (params[0]?.toUpperCase() ?? "").trim();
+
+                    function notice(line: string) {
+                        send(`:${SERVER_HOSTNAME} NOTICE ${nick} :${line}`);
+                    }
+
+                    if (!topic || topic === "COMMANDS" || topic === "LIST") {
+                        notice("Custom commands available:");
+                        notice("AUTH      — Register/login your nickname. See: HELP AUTH");
+                        notice("SETNAME   — Set your real name. See: HELP SETNAME");
+                        notice("MODE      — Channel modes (+i, +k, +l, +t, +o/-o, +P). See: HELP MODE");
+                        notice("Note: Registered nicks must AUTH LOGIN before chatting or joining.");
+                        break;
+                    }
+
+                    switch (topic) {
+                        case "AUTH": {
+                            notice("AUTH commands:");
+                            notice("AUTH REGISTER <password>  — Register current nick");
+                            notice("AUTH LOGIN <password>     — Authenticate as current nick");
+                            notice("AUTH LOGOUT               — Log out");
+                            notice("AUTH STATUS               — Show authentication status");
+                            notice("AUTH DELETE               — Delete your registered account");
+                            break;
+                        }
+                        case "SETNAME": {
+                            notice("SETNAME <realname> — Set your real name (gecos)");
+                            break;
+                        }
+                        case "MODE": {
+                            notice("Channel MODE help:");
+                            notice("MODE #chan +i | -i             — Invite-only toggle");
+                            notice("MODE #chan +k <key> | -k       — Channel key (password)");
+                            notice("MODE #chan +l <n> | -l         — User limit");
+                            notice("MODE #chan +t | -t             — Only ops may set topic");
+                            notice("MODE #chan +o <nick> | -o <nick> — Grant/revoke operator");
+                            notice("MODE #chan +P | -P             — Persist channel (custom)");
+                            break;
+                        }
+                        default: {
+                            notice(`No help for topic: ${topic}`);
+                            notice("Try: HELP AUTH | HELP SETNAME | HELP MODE | HELP");
+                            break;
+                        }
+                    }
+
+                    break;
+                }
+
                 case "MOTD": {
                     sendMotd(nick);
                     break;
@@ -1190,7 +1245,7 @@ const server = net.createServer((socket) => {
             }
 
             if (![
-                "PING", "PONG", "MOTD", "CAP", "NICK", "USER", "SETNAME", "AUTH", "AWAY", "ISON", "JOIN", "INVITE", "MODE", "PART", "LIST", "WHO", "TOPIC", "KICK", "NAMES", "PRIVMSG", "NOTICE", "WHOIS", "LUSERS", "QUIT"
+                "PING", "PONG", "HELP", "MOTD", "CAP", "NICK", "USER", "SETNAME", "AUTH", "AWAY", "ISON", "JOIN", "INVITE", "MODE", "PART", "LIST", "WHO", "TOPIC", "KICK", "NAMES", "PRIVMSG", "NOTICE", "WHOIS", "LUSERS", "QUIT"
             ].includes(command)) {
                 send(`:${SERVER_HOSTNAME} 421 ${nick || '*'} ${command} :Unknown command`);
             }
