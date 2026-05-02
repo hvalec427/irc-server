@@ -145,7 +145,7 @@ const server = net.createServer((socket) => {
             send(`:${SERVER_HOSTNAME} 002 ${nick} :Your host is ${SERVER_HOSTNAME}, running version 0.1`);
             send(`:${SERVER_HOSTNAME} 003 ${nick} :This server was created just now`);
             send(`:${SERVER_HOSTNAME} 004 ${nick} ${SERVER_HOSTNAME} 0.1 o o`);
-            send(`:${SERVER_HOSTNAME} 005 ${nick} CHANTYPES=# CHANMODES=,k,l,itP PREFIX=(o)@ CASEMAPPING=rfc1459 NICKLEN=30 USERLEN=12 :are supported by this server`);
+            send(`:${SERVER_HOSTNAME} 005 ${nick} CHANTYPES=# CHANMODES=,k,l,itP PREFIX=(o)@ CASEMAPPING=rfc1459 NICKLEN=30 USERLEN=12 SAFELIST :are supported by this server`);
             send(`:${SERVER_HOSTNAME} 251 ${nick} :There are ${clientsByNick.size} users and 0 invisible on 1 servers`);
             send(`:${SERVER_HOSTNAME} 255 ${nick} :I have ${clientsByNick.size} clients and 1 servers`);
             send(
@@ -495,84 +495,98 @@ const server = net.createServer((socket) => {
                         continue;
                     }
 
-                    const channel = line.split(" ")[1]?.trim();
-
-                    if (!channel) {
+                    const channelsParam = params[0]?.trim();
+                    if (!channelsParam) {
                         socket.write(`:${SERVER_HOSTNAME} 461 ${nick ?? "*"} JOIN :Not enough parameters\r\n`);
                         continue;
                     }
 
-                    if (!channel.startsWith("#")) {
-                        socket.write(`:${SERVER_HOSTNAME} 403 ${nick ?? "*"} ${channel} :No such channel\r\n`);
-                        continue;
-                    }
+                    const keysParam = params[1]?.trim();
+                    const channelNames = channelsParam
+                        .split(",")
+                        .map((c) => c.trim())
+                        .filter((c) => c.length > 0);
+                    const keys = (keysParam ? keysParam.split(",").map((k) => k.trim()) : []);
 
-                    if (!channels.has(channel)) {
-                        channels.set(channel, new Set());
-                    }
+                    for (let i = 0; i < channelNames.length; i++) {
+                        const channel = channelNames[i];
+                        const providedKey = keys[i];
 
-                    if (channels.get(channel)!.has(socket)) {
-                        continue;
-                    }
-
-                    const limit = channelLimits.get(channel);
-
-                    if (limit && channels.get(channel)!.size >= limit) {
-                        send(`:${SERVER_HOSTNAME} 471 ${nick} ${channel} :Cannot join channel (+l)`);
-                        continue;
-                    }
-
-                    if (inviteOnlyChannels.has(channel)) {
-                        const invites = channelInvites.get(channel);
-
-                        if (!invites?.has(nick)) {
-                            send(`:${SERVER_HOSTNAME} 473 ${nick} ${channel} :Cannot join channel (+i)`);
+                        if (!channel.startsWith("#")) {
+                            socket.write(`:${SERVER_HOSTNAME} 403 ${nick ?? "*"} ${channel} :No such channel\r\n`);
                             continue;
                         }
-                    }
-
-                    const requiredKey = channelKeys.get(channel);
-                    const providedKey = line.split(" ")[2]?.trim();
-
-                    if (requiredKey && providedKey !== requiredKey) {
-                        send(`:${SERVER_HOSTNAME} 475 ${nick} ${channel} :Cannot join channel (+k)`);
-                        continue;
-                    }
-
-                    channelInvites.get(channel)?.delete(nick);
-
-                    channels.get(channel)!.add(socket);
-                    (socket as any).channels.add(channel);
-
-                    if ((channelOperatorNames.get(channel)?.size ?? 0) === 0) {
-                        if (!channelOperatorNames.has(channel)) {
-                            channelOperatorNames.set(channel, new Set<string>());
+                        // RFC1459 forbids commas in channel names; guard against malformed inputs
+                        if (channel.includes(",") || channel.includes(" ")) {
+                            socket.write(`:${SERVER_HOSTNAME} 403 ${nick ?? "*"} ${channel} :No such channel\r\n`);
+                            continue;
                         }
-                        channelOperatorNames.get(channel)!.add(nick);
-                    }
-                    for (const member of channels.get(channel)!) {
-                        member.write(`:${userPrefix()} JOIN ${channel}\r\n`);
-                    }
-                    const topic = topics.get(channel);
 
-                    if (topic) {
-                        send(`:${SERVER_HOSTNAME} 332 ${nick} ${channel} :${topic}`);
-                    } else {
-                        send(`:${SERVER_HOSTNAME} 331 ${nick} ${channel} :No topic is set`);
+                        if (!channels.has(channel)) {
+                            channels.set(channel, new Set());
+                        }
+
+                        if (channels.get(channel)!.has(socket)) {
+                            continue;
+                        }
+
+                        const limit = channelLimits.get(channel);
+
+                        if (limit && channels.get(channel)!.size >= limit) {
+                            send(`:${SERVER_HOSTNAME} 471 ${nick} ${channel} :Cannot join channel (+l)`);
+                            continue;
+                        }
+
+                        if (inviteOnlyChannels.has(channel)) {
+                            const invites = channelInvites.get(channel);
+
+                            if (!invites?.has(nick)) {
+                                send(`:${SERVER_HOSTNAME} 473 ${nick} ${channel} :Cannot join channel (+i)`);
+                                continue;
+                            }
+                        }
+
+                        const requiredKey = channelKeys.get(channel);
+                        if (requiredKey && providedKey !== requiredKey) {
+                            send(`:${SERVER_HOSTNAME} 475 ${nick} ${channel} :Cannot join channel (+k)`);
+                            continue;
+                        }
+
+                        channelInvites.get(channel)?.delete(nick);
+
+                        channels.get(channel)!.add(socket);
+                        (socket as any).channels.add(channel);
+
+                        if ((channelOperatorNames.get(channel)?.size ?? 0) === 0) {
+                            if (!channelOperatorNames.has(channel)) {
+                                channelOperatorNames.set(channel, new Set<string>());
+                            }
+                            channelOperatorNames.get(channel)!.add(nick);
+                        }
+                        for (const member of channels.get(channel)!) {
+                            member.write(`:${userPrefix()} JOIN ${channel}\r\n`);
+                        }
+                        const topic = topics.get(channel);
+
+                        if (topic) {
+                            send(`:${SERVER_HOSTNAME} 332 ${nick} ${channel} :${topic}`);
+                        } else {
+                            send(`:${SERVER_HOSTNAME} 331 ${nick} ${channel} :No topic is set`);
+                        }
+
+                        const members = [...channels.get(channel)!]
+                            .map((s) => {
+                                const memberNick = (s as any).nick;
+                                if (!memberNick) return null;
+                                const isOp = channelOperatorNames.get(channel)?.has(memberNick);
+                                return `${isOp ? "@" : ""}${memberNick}`;
+                            })
+                            .filter(Boolean)
+                            .join(" ");
+
+                        send(`:${SERVER_HOSTNAME} 353 ${nick} = ${channel} :${members}`);
+                        send(`:${SERVER_HOSTNAME} 366 ${nick} ${channel} :End of /NAMES list`);
                     }
-
-                    const members = [...channels.get(channel)!]
-                        .map((s) => {
-                            const memberNick = (s as any).nick;
-                            if (!memberNick) return null;
-                            const isOp = channelOperatorNames.get(channel)?.has(memberNick);
-                            return `${isOp ? "@" : ""}${memberNick}`;
-                        })
-                        .filter(Boolean)
-                        .join(" ");
-
-                    send(`:${SERVER_HOSTNAME} 353 ${nick} = ${channel} :${members}`);
-                    send(`:${SERVER_HOSTNAME} 366 ${nick} ${channel} :End of /NAMES list`);
                     break;
                 }
 
