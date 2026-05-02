@@ -62,6 +62,10 @@ const server = net.createServer((socket) => {
     let awayMessage = "";
     let lastActivity = Date.now();
 
+    (socket as any).channels = new Set<string>();
+    (socket as any).signonTime = Date.now();
+    (socket as any).lastActivity = lastActivity;
+
     function canUseNick() {
         if (!nick) return false;
 
@@ -125,6 +129,7 @@ const server = net.createServer((socket) => {
 
     socket.on("data", (data) => {
         lastActivity = Date.now();
+        (socket as any).lastActivity = lastActivity;
         const lines = data.toString().split("\r\n");
 
         for (const rawLine of lines) {
@@ -362,6 +367,7 @@ const server = net.createServer((socket) => {
                     channelInvites.get(channel)?.delete(nick);
 
                     channels.get(channel)!.add(socket);
+                    (socket as any).channels.add(channel);
 
                     if ((channelOperatorNames.get(channel)?.size ?? 0) === 0) {
                         if (!channelOperatorNames.has(channel)) {
@@ -486,7 +492,6 @@ const server = net.createServer((socket) => {
                                 continue;
                             }
 
-                            // operator status is tracked by nickname only
                             if (!channelOperatorNames.has(target)) {
                                 channelOperatorNames.set(target, new Set<string>());
                             }
@@ -519,12 +524,10 @@ const server = net.createServer((socket) => {
                                 continue;
                             }
 
-                            // remove operator privilege by nickname
                             channelOperatorNames.get(target)?.delete(targetNick);
 
                             const names = channelOperatorNames.get(target) ?? new Set<string>();
                             if (names.size === 0) {
-                                // prevent removing the last operator
                                 names.add(targetNick);
                                 channelOperatorNames.set(target, names);
                                 send(`:${SERVER_HOSTNAME} 482 ${nick} ${target} :Cannot remove last operator`);
@@ -643,12 +646,12 @@ const server = net.createServer((socket) => {
                     }
 
                     members.delete(socket);
+                    (socket as any).channels.delete(channel);
 
                     const names = channelOperatorNames.get(channel);
                     if (names?.has(nick)) {
                         names.delete(nick);
                     }
-                    // If no operators remain but members still present, promote first member
                     if ((channelOperatorNames.get(channel)?.size ?? 0) === 0 && members.size > 0) {
                         const next = members.values().next();
                         if (!next.done) {
@@ -782,6 +785,7 @@ const server = net.createServer((socket) => {
                     }
 
                     members.delete(targetSocket);
+                    (targetSocket as any).channels?.delete(channel);
 
                     const names = channelOperatorNames.get(channel);
                     if (names?.has(targetNick)) {
@@ -926,7 +930,7 @@ const server = net.createServer((socket) => {
 
                     const username = (client as any).username ?? "unknown";
                     const realname = (client as any).realname ?? "unknown";
-                    const channels = (client as any).channels ?? [];
+                    const joinedChannels = [...(((client as any).channels) ?? new Set<string>())];
                     const awayMessage = (client as any).awayMessage ?? null;
                     const idleSeconds = Math.floor((Date.now() - ((client as any).lastActivity ?? Date.now())) / 1000);
                     const signonTime = Math.floor(((client as any).signonTime ?? Date.now()) / 1000);
@@ -938,8 +942,8 @@ const server = net.createServer((socket) => {
 
                     send(`:${SERVER_HOSTNAME} 312 ${nick} ${target} ${SERVER_HOSTNAME} :IRC server`);
 
-                    if (channels.length > 0) {
-                        send(`:${SERVER_HOSTNAME} 319 ${nick} ${target} :${channels.join(" ")}`);
+                    if (joinedChannels.length > 0) {
+                        send(`:${SERVER_HOSTNAME} 319 ${nick} ${target} :${joinedChannels.join(" ")}`);
                     }
 
                     send(`:${SERVER_HOSTNAME} 317 ${nick} ${target} ${idleSeconds} ${signonTime} :seconds idle, signon time`);
@@ -993,13 +997,13 @@ const server = net.createServer((socket) => {
             if (!members.has(socket)) continue;
 
             members.delete(socket);
+            (socket as any).channels?.delete(channel);
 
             for (const member of members) {
                 if ((member as any).writableEnded || member.destroyed || !member.writable) continue;
                 member.write(`:${nick}!${username}${SERVER_HOSTNAME} QUIT :${reason}\r\n`);
             }
 
-            // online operator sockets are not tracked; operator status persists by nickname
 
             if (members.size === 0) {
                 channels.delete(channel);
