@@ -18,10 +18,31 @@ const channelLimits = new Map<string, number>();
 const topicProtectedChannels = new Set<string>();
 const accounts = new Map<string, string>();
 const channelOperatorNames = new Map<string, Set<string>>();
+const persistableChannels = new Set<string>();
 
-loadState(accounts, topics, inviteOnlyChannels, topicProtectedChannels, channelKeys, channelLimits, channelOperatorNames);
+loadState(
+    accounts,
+    topics,
+    inviteOnlyChannels,
+    topicProtectedChannels,
+    channelKeys,
+    channelLimits,
+    channelOperatorNames,
+    persistableChannels
+);
 
-startPeriodicSaving(() => saveState(accounts, topics, inviteOnlyChannels, topicProtectedChannels, channelKeys, channelLimits, channelOperatorNames));
+startPeriodicSaving(() =>
+    saveState(
+        accounts,
+        topics,
+        inviteOnlyChannels,
+        topicProtectedChannels,
+        channelKeys,
+        channelLimits,
+        channelOperatorNames,
+        persistableChannels
+    )
+);
 
 function parseIrcLine(rawLine: string): { raw: string; command: string; params: string[] } | null {
     let line = rawLine.trim();
@@ -120,7 +141,7 @@ const server = net.createServer((socket) => {
             send(`:${SERVER_HOSTNAME} 002 ${nick} :Your host is ${SERVER_HOSTNAME}, running version 0.1`);
             send(`:${SERVER_HOSTNAME} 003 ${nick} :This server was created just now`);
             send(`:${SERVER_HOSTNAME} 004 ${nick} ${SERVER_HOSTNAME} 0.1 o o`);
-            send(`:${SERVER_HOSTNAME} 005 ${nick} CHANTYPES=# CHANMODES=,k,l,it PREFIX=(o)@ CASEMAPPING=rfc1459 NICKLEN=30 USERLEN=12 :are supported by this server`);
+            send(`:${SERVER_HOSTNAME} 005 ${nick} CHANTYPES=# CHANMODES=,k,l,itP PREFIX=(o)@ CASEMAPPING=rfc1459 NICKLEN=30 USERLEN=12 :are supported by this server`);
             send(`:${SERVER_HOSTNAME} 251 ${nick} :There are ${clientsByNick.size} users and 0 invisible on 1 servers`);
             send(`:${SERVER_HOSTNAME} 255 ${nick} :I have ${clientsByNick.size} clients and 1 servers`);
             send(
@@ -659,12 +680,33 @@ const server = net.createServer((socket) => {
                             continue;
                         }
 
+                        if (mode === "+P") {
+                            persistableChannels.add(target);
+
+                            for (const member of channels.get(target)!) {
+                                member.write(`:${userPrefix()} MODE ${target} +P\r\n`);
+                            }
+
+                            continue;
+                        }
+
+                        if (mode === "-P") {
+                            persistableChannels.delete(target);
+
+                            for (const member of channels.get(target)!) {
+                                member.write(`:${userPrefix()} MODE ${target} -P\r\n`);
+                            }
+
+                            continue;
+                        }
+
                         let modes = "";
 
                         if (inviteOnlyChannels.has(target)) modes += "i";
                         if (channelKeys.has(target)) modes += "k";
                         if (channelLimits.has(target)) modes += "l";
                         if (topicProtectedChannels.has(target)) modes += "t";
+                        if (persistableChannels.has(target)) modes += "P";
 
                         send(`:${SERVER_HOSTNAME} 324 ${nick} ${target} +${modes}`);
                     }

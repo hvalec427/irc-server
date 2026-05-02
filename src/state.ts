@@ -8,6 +8,7 @@ export type ChannelState = {
         topicProtected: boolean;
         key: string | null;
         limit: number | null;
+        persist: boolean;
     };
     operators: string[];
 };
@@ -40,7 +41,8 @@ export function saveState(
     topicProtectedChannels: Set<string>,
     channelKeys: Map<string, string>,
     channelLimits: Map<string, number>,
-    channelOperatorNames: Map<string, Set<string>>
+    channelOperatorNames: Map<string, Set<string>>,
+    persistableChannels: Set<string>
 ) {
     const channelsState: Record<string, ChannelState> = {};
     const channelNames = new Set<string>();
@@ -63,8 +65,13 @@ export function saveState(
     for (const channel of channelOperatorNames.keys()) {
         channelNames.add(channel);
     }
+    for (const channel of persistableChannels.values()) {
+        channelNames.add(channel);
+    }
 
     for (const channel of channelNames) {
+        if (!persistableChannels.has(channel)) continue;
+
         channelsState[channel] = {
             topic: topics.get(channel) ?? null,
             modes: {
@@ -72,6 +79,7 @@ export function saveState(
                 topicProtected: topicProtectedChannels.has(channel),
                 key: channelKeys.get(channel) ?? null,
                 limit: channelLimits.get(channel) ?? null,
+                persist: true,
             },
             operators: [...(channelOperatorNames.get(channel) ?? new Set<string>())],
         };
@@ -92,7 +100,8 @@ export function loadState(
     topicProtectedChannels: Set<string>,
     channelKeys: Map<string, string>,
     channelLimits: Map<string, number>,
-    channelOperatorNames: Map<string, Set<string>>
+    channelOperatorNames: Map<string, Set<string>>,
+    persistableChannels: Set<string>
 ) {
     const unlockedState = readState();
     for (const [nick, password] of Object.entries(unlockedState.accounts)) {
@@ -102,6 +111,9 @@ export function loadState(
     }
 
     for (const [channel, channelState] of Object.entries(unlockedState.channels)) {
+        if (channelState?.modes?.persist === true) {
+            persistableChannels.add(channel);
+        }
         if (channelState.topic !== null) {
             topics.set(channel, channelState.topic);
         }
