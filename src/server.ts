@@ -6,6 +6,7 @@ import { loadState, saveState, startPeriodicSaving } from "./state";
 
 const ENABLE_KEEPALIVE = process.env.ENABLE_KEEPALIVE === "true";
 const SERVER_HOSTNAME = process.env.SERVER_HOSTNAME || "irc.hvalec.com";
+const SERVER_VERSION = process.env.SERVER_VERSION || "0.0.1";
 
 const usedNicks = new Set<string>();
 const channels = new Map<string, Set<net.Socket>>();
@@ -142,9 +143,9 @@ const server = net.createServer((socket) => {
         if (!registered && nick && username && realname) {
             registered = true;
             send(`:${SERVER_HOSTNAME} 001 ${nick} :Welcome to the IRC Network, ${nick}!${username}@${SERVER_HOSTNAME}`);
-            send(`:${SERVER_HOSTNAME} 002 ${nick} :Your host is ${SERVER_HOSTNAME}, running version 0.1`);
+            send(`:${SERVER_HOSTNAME} 002 ${nick} :Your host is ${SERVER_HOSTNAME}, running version ${SERVER_VERSION}`);
             send(`:${SERVER_HOSTNAME} 003 ${nick} :This server was created just now`);
-            send(`:${SERVER_HOSTNAME} 004 ${nick} ${SERVER_HOSTNAME} 0.1 o o`);
+            send(`:${SERVER_HOSTNAME} 004 ${nick} ${SERVER_HOSTNAME} ${SERVER_VERSION} o o`);
             send(`:${SERVER_HOSTNAME} 005 ${nick} CHANTYPES=# CHANMODES=,k,l,itP PREFIX=(o)@ CASEMAPPING=rfc1459 NICKLEN=30 USERLEN=12 SAFELIST :are supported by this server`);
             send(`:${SERVER_HOSTNAME} 251 ${nick} :There are ${clientsByNick.size} users and 0 invisible on 1 servers`);
             send(`:${SERVER_HOSTNAME} 255 ${nick} :I have ${clientsByNick.size} clients and 1 servers`);
@@ -251,6 +252,22 @@ const server = net.createServer((socket) => {
 
                 case "MOTD": {
                     sendMotd(nick);
+                    break;
+                }
+
+                case "TIME": {
+                    const when = new Date();
+                    const recipient = nick || '*';
+                    // RFC 1459 RPL_TIME (391): "<server> :<string showing server's local time>"
+                    send(`:${SERVER_HOSTNAME} 391 ${recipient} ${SERVER_HOSTNAME} :${when.toString()}`);
+                    break;
+                }
+
+                case "VERSION": {
+                    const recipient = nick || '*';
+                    // RFC 1459 RPL_VERSION (351): "<version> <server> :<comments>"
+                    const comment = `tiny IRC server`;
+                    send(`:${SERVER_HOSTNAME} 351 ${recipient} ${SERVER_VERSION} ${SERVER_HOSTNAME} :${comment}`);
                     break;
                 }
 
@@ -1268,7 +1285,7 @@ const server = net.createServer((socket) => {
             }
 
             if (![
-                "PING", "PONG", "HELP", "MOTD", "CAP", "NICK", "USER", "SETNAME", "AUTH", "AWAY", "ISON", "JOIN", "INVITE", "MODE", "PART", "LIST", "WHO", "TOPIC", "KICK", "NAMES", "PRIVMSG", "NOTICE", "WHOIS", "LUSERS", "QUIT"
+                "PING", "PONG", "HELP", "MOTD", "TIME", "VERSION", "CAP", "NICK", "USER", "SETNAME", "AUTH", "AWAY", "ISON", "JOIN", "INVITE", "MODE", "PART", "LIST", "WHO", "TOPIC", "KICK", "NAMES", "PRIVMSG", "NOTICE", "WHOIS", "LUSERS", "QUIT"
             ].includes(command)) {
                 send(`:${SERVER_HOSTNAME} 421 ${nick || '*'} ${command} :Unknown command`);
             }
