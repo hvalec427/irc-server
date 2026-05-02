@@ -16,6 +16,8 @@ const channelInvites = new Map<string, Set<string>>();
 const channelKeys = new Map<string, string>();
 const channelLimits = new Map<string, number>();
 const topicProtectedChannels = new Set<string>();
+const accounts = new Map<string, string>();
+const authenticatedNicks = new Set<string>();
 
 function parseIrcLine(rawLine: string): { raw: string; command: string; params: string[] } | null {
     let line = rawLine.trim();
@@ -57,6 +59,22 @@ const server = net.createServer((socket) => {
     let awayMessage = "";
     let lastActivity = Date.now();
 
+    function canUseNick() {
+        if (!nick) return false;
+
+        // if nick isn't registered → allowed
+        if (!accounts.has(nick)) return true;
+
+        // if registered → must be logged in
+        return authenticatedNicks.has(nick);
+    }
+
+    function canSendMessage() {
+        if (!accounts.has(nick)) return true;
+
+        return authenticatedNicks.has(nick);
+    }
+
     if (ENABLE_KEEPALIVE) {
         const interval = setInterval(() => {
             if (Date.now() - lastActivity > 60_000) {
@@ -84,6 +102,9 @@ const server = net.createServer((socket) => {
         send(`:${SERVER_HOSTNAME} 376 ${nick} :End of /MOTD command`);
     }
 
+    let disconnected = false;
+    let quitReason: string | null = null;
+
     function tryRegister() {
         if (!registered && nick && username && realname) {
             registered = true;
@@ -94,6 +115,9 @@ const server = net.createServer((socket) => {
             send(`:${SERVER_HOSTNAME} 005 ${nick} CHANTYPES=# CHANMODES=,k,l,it PREFIX=(o)@ CASEMAPPING=rfc1459 NICKLEN=30 USERLEN=12 :are supported by this server`);
             send(`:${SERVER_HOSTNAME} 251 ${nick} :There are ${clientsByNick.size} users and 0 invisible on 1 servers`);
             send(`:${SERVER_HOSTNAME} 255 ${nick} :I have ${clientsByNick.size} clients and 1 servers`);
+            send(
+                `:${SERVER_HOSTNAME} NOTICE ${nick} :Tip: Register your nickname with AUTH REGISTER <password>`
+            );
             sendMotd(nick);
         }
     }
@@ -158,6 +182,18 @@ const server = net.createServer((socket) => {
                     clientsByNick.set(nick, socket);
                     (socket as any).nick = nick;
 
+                    if (accounts.has(nick)) {
+                        authenticatedNicks.delete(nick);
+
+                        send(
+                            `:${SERVER_HOSTNAME} NOTICE ${nick} :This nickname is registered. Use AUTH LOGIN <password>`
+                        );
+                    } else {
+                        send(
+                            `:${SERVER_HOSTNAME} NOTICE ${nick} :Nickname ${nick} is not registered. Claim it with AUTH REGISTER <password>`
+                        );
+                    }
+
                     tryRegister();
                     break;
                 }
@@ -189,6 +225,61 @@ const server = net.createServer((socket) => {
                     break;
                 }
 
+                case "AUTH": {
+                    const subcommand = params[0]?.toUpperCase();
+                    const password = params[1];
+
+                    if (!nick) {
+                        send(`:${SERVER_HOSTNAME} 451 * :You must set NICK first`);
+                        continue;
+                    }
+
+                    if (!password) {
+                        send(`:${SERVER_HOSTNAME} 461 ${nick} AUTH :Not enough parameters`);
+                        continue;
+                    }
+
+                    switch (subcommand) {
+                        case "REGISTER": {
+                            if (accounts.has(nick)) {
+                                send(`:${SERVER_HOSTNAME} NOTICE ${nick} :Account already exists for ${nick}`);
+                                continue;
+                            }
+
+                            accounts.set(nick, password);
+                            authenticatedNicks.add(nick);
+
+                            send(`:${SERVER_HOSTNAME} NOTICE ${nick} :Account registered and authenticated as ${nick}`);
+                            break;
+                        }
+                        case "LOGIN": {
+                            const savedPassword = accounts.get(nick);
+
+                            if (!savedPassword) {
+                                send(`:${SERVER_HOSTNAME} NOTICE ${nick} :No account registered for ${nick}`);
+                                continue;
+                            }
+
+                            if (savedPassword !== password) {
+                                send(`:${SERVER_HOSTNAME} NOTICE ${nick} :Invalid password`);
+                                continue;
+                            }
+
+                            authenticatedNicks.add(nick);
+
+                            send(`:${SERVER_HOSTNAME} NOTICE ${nick} :You are now authenticated as ${nick}`);
+                            break;
+                        }
+                        default: {
+                            send(`:${SERVER_HOSTNAME} NOTICE ${nick} :Usage: AUTH REGISTER <password> or AUTH LOGIN <password>`);
+                            break;
+                        }
+
+                    }
+
+                    break;
+                }
+
                 case "AWAY": {
                     const message = params[0]?.trim();
 
@@ -216,6 +307,13 @@ const server = net.createServer((socket) => {
                 }
 
                 case "JOIN": {
+                    if (!canUseNick()) {
+                        send(
+                            `:${SERVER_HOSTNAME} NOTICE ${nick} :This nickname is registered. Use AUTH LOGIN <password>`
+                        );
+                        continue;
+                    }
+
                     const channel = line.split(" ")[1]?.trim();
 
                     if (!channel) {
@@ -713,6 +811,13 @@ const server = net.createServer((socket) => {
                 }
 
                 case "PRIVMSG": {
+                    if (!canSendMessage()) {
+                        send(
+                            `:${SERVER_HOSTNAME} NOTICE ${nick} :This nickname is registered. Use AUTH LOGIN <password>`
+                        );
+                        continue;
+                    }
+
                     const [target, message] = params;
 
                     if (!registered) {
@@ -763,6 +868,13 @@ const server = net.createServer((socket) => {
                 }
 
                 case "NOTICE": {
+                    if (!canSendMessage()) {
+                        send(
+                            `:${SERVER_HOSTNAME} NOTICE ${nick} :This nickname is registered. Use AUTH LOGIN <password>`
+                        );
+                        continue;
+                    }
+
                     const [target, message] = params;
                     if (!target || !message) continue;
                     if (target.startsWith("#")) {
@@ -834,50 +946,14 @@ const server = net.createServer((socket) => {
                 }
 
                 case "QUIT": {
-                    const message = params[1] ?? "Client quit";
-
-                    for (const [channel, members] of channels) {
-                        if (members.has(socket)) {
-                            for (const member of members) {
-                                if (member !== socket) {
-                                    member.write(
-                                        `:${nick}!${username}${SERVER_HOSTNAME} QUIT :${message}\r\n`
-                                    );
-                                }
-                            }
-
-                            const ops = channelOperators.get(channel);
-
-                            if (ops) {
-                                ops.delete(socket);
-
-                                if (ops.size === 0 && members.size > 0) {
-                                    const iterator = members.values().next();
-
-                                    if (!iterator.done) {
-                                        ops.add(iterator.value);
-                                    }
-                                }
-                            }
-
-                            if (members.size === 0) {
-                                channels.delete(channel);
-                            }
-                        }
-                    }
-
-                    if (nick) {
-                        usedNicks.delete(nick);
-                        clientsByNick.delete(nick);
-                    }
-
+                    quitReason = params[0]?.trim() ?? "Client quit";
                     socket.end();
                     break;
                 }
             }
 
             if (![
-                "PING", "PONG", "MOTD", "NICK", "USER", "AWAY", "ISON", "JOIN", "INVITE", "MODE", "PART", "LIST", "WHO", "TOPIC", "KICK", "NAMES", "PRIVMSG", "NOTICE", "WHOIS", "LUSERS", "QUIT"
+                "PING", "PONG", "MOTD", "NICK", "USER", "AUTH", "AWAY", "ISON", "JOIN", "INVITE", "MODE", "PART", "LIST", "WHO", "TOPIC", "KICK", "NAMES", "PRIVMSG", "NOTICE", "WHOIS", "LUSERS", "QUIT"
             ].includes(command)) {
                 send(`:${SERVER_HOSTNAME} 421 ${nick || '*'} ${command} :Unknown command`);
             }
@@ -885,26 +961,49 @@ const server = net.createServer((socket) => {
     });
 
     socket.on("close", () => {
+        if (disconnected) return;
+        disconnected = true;
+
         if (nick) {
             usedNicks.delete(nick);
             clientsByNick.delete(nick);
+            authenticatedNicks.delete(nick);
         }
 
+        const reason = quitReason ?? "Client disconnected";
+
         for (const [channel, members] of channels) {
-            if (members.has(socket)) {
-                members.delete(socket);
+            if (!members.has(socket)) continue;
 
-                for (const member of members) {
-                    member.write(`:${nick}!${username}${SERVER_HOSTNAME} QUIT :Client disconnected\r\n`);
-                }
+            members.delete(socket);
 
-                if (members.size === 0) {
-                    channels.delete(channel);
+            for (const member of members) {
+                if ((member as any).writableEnded || member.destroyed || !member.writable) continue;
+                member.write(`:${nick}!${username}${SERVER_HOSTNAME} QUIT :${reason}\r\n`);
+            }
+
+            const ops = channelOperators.get(channel);
+            if (ops) {
+                ops.delete(socket);
+
+                if (ops.size === 0 && members.size > 0) {
+                    const iterator = members.values().next();
+                    if (!iterator.done) {
+                        ops.add(iterator.value);
+                    }
                 }
+            }
+
+            if (members.size === 0) {
+                channels.delete(channel);
             }
         }
 
         console.info(`${nick || "client"} disconnected`);
+    });
+
+    socket.on("error", (error) => {
+        console.info(`socket error for ${nick || "unknown"}: ${error.message}`);
     });
 });
 
