@@ -282,13 +282,13 @@ const server = net.createServer((socket) => {
                         continue;
                     }
 
-                    if (!password) {
-                        send(`:${SERVER_HOSTNAME} 461 ${nick} AUTH :Not enough parameters`);
-                        continue;
-                    }
-
                     switch (subcommand) {
                         case "REGISTER": {
+                            if (!password) {
+                                send(`:${SERVER_HOSTNAME} 461 ${nick} AUTH :Not enough parameters`);
+                                continue;
+                            }
+
                             if (accounts.has(nick)) {
                                 send(`:${SERVER_HOSTNAME} NOTICE ${nick} :Account already exists for ${nick}`);
                                 continue;
@@ -308,6 +308,11 @@ const server = net.createServer((socket) => {
                             break;
                         }
                         case "LOGIN": {
+                            if (!password) {
+                                send(`:${SERVER_HOSTNAME} 461 ${nick} AUTH :Not enough parameters`);
+                                continue;
+                            }
+
                             const savedPassword = accounts.get(nick);
 
                             if (!savedPassword) {
@@ -344,8 +349,43 @@ const server = net.createServer((socket) => {
                             send(`:${SERVER_HOSTNAME} NOTICE ${nick} :You are now authenticated as ${nick}`);
                             break;
                         }
+                        case "LOGOUT": {
+                            if ((socket as any).account !== nick) {
+                                send(`:${SERVER_HOSTNAME} NOTICE ${nick} :You are not authenticated`);
+                                continue;
+                            }
+
+                            delete (socket as any).account;
+                            send(`:${SERVER_HOSTNAME} NOTICE ${nick} :You are now logged out`);
+                            break;
+                        }
+                        case "STATUS": {
+                            if ((socket as any).account !== nick) {
+                                send(`:${SERVER_HOSTNAME} NOTICE ${nick} :You are not authenticated`);
+                                continue;
+                            }
+
+                            send(`:${SERVER_HOSTNAME} NOTICE ${nick} :Authenticated as ${nick}`);
+                            break;
+                        }
+                        case "DELETE": {
+                            if ((socket as any).account !== nick) {
+                                send(`:${SERVER_HOSTNAME} NOTICE ${nick} :You are not authenticated`);
+                                continue;
+                            }
+
+                            if (!accounts.has(nick)) {
+                                send(`:${SERVER_HOSTNAME} NOTICE ${nick} :No account registered for ${nick}`);
+                                continue;
+                            }
+
+                            accounts.delete(nick);
+                            delete (socket as any).account;
+                            send(`:${SERVER_HOSTNAME} NOTICE ${nick} :Account deleted for ${nick}`);
+                            break;
+                        }
                         default: {
-                            send(`:${SERVER_HOSTNAME} NOTICE ${nick} :Usage: AUTH REGISTER <password> or AUTH LOGIN <password>`);
+                            send(`:${SERVER_HOSTNAME} NOTICE ${nick} :Usage: AUTH REGISTER <password> | AUTH LOGIN <password> | AUTH LOGOUT | AUTH STATUS | AUTH DELETE`);
                             break;
                         }
 
