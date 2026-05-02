@@ -78,6 +78,10 @@ const server = net.createServer((socket) => {
         return canUseNick();
     }
 
+    function userPrefix() {
+        return `${nick}!${username}@${SERVER_HOSTNAME}`;
+    }
+
     if (ENABLE_KEEPALIVE) {
         const interval = setInterval(() => {
             if (Date.now() - lastActivity > 60_000) {
@@ -376,7 +380,7 @@ const server = net.createServer((socket) => {
                         channelOperatorNames.get(channel)!.add(nick);
                     }
                     for (const member of channels.get(channel)!) {
-                        member.write(`:${nick}!${username}${SERVER_HOSTNAME} JOIN ${channel}\r\n`);
+                        member.write(`:${userPrefix()} JOIN ${channel}\r\n`);
                     }
                     const topic = topics.get(channel);
 
@@ -438,7 +442,7 @@ const server = net.createServer((socket) => {
                     channelInvites.get(channel)!.add(targetNick);
 
                     targetSocket.write(
-                        `:${nick}!${username}${SERVER_HOSTNAME} INVITE ${targetNick} :${channel}\r\n`
+                        `:${userPrefix()} INVITE ${targetNick} :${channel}\r\n`
                     );
 
                     send(`:${SERVER_HOSTNAME} 341 ${nick} ${targetNick} ${channel}`);
@@ -465,13 +469,13 @@ const server = net.createServer((socket) => {
 
                         if (mode === "+i") {
                             inviteOnlyChannels.add(target);
-                            send(`:${nick}!${username}${SERVER_HOSTNAME} MODE ${target} +i`);
+                            send(`:${userPrefix()} MODE ${target} +i`);
                             continue;
                         }
 
                         if (mode === "-i") {
                             inviteOnlyChannels.delete(target);
-                            send(`:${nick}!${username}${SERVER_HOSTNAME} MODE ${target} -i`);
+                            send(`:${userPrefix()} MODE ${target} -i`);
                             continue;
                         }
 
@@ -499,7 +503,7 @@ const server = net.createServer((socket) => {
 
                             for (const member of channels.get(target)!) {
                                 member.write(
-                                    `:${nick}!${username}${SERVER_HOSTNAME} MODE ${target} +o ${targetNick}\r\n`
+                                    `:${userPrefix()} MODE ${target} +o ${targetNick}\r\n`
                                 );
                             }
 
@@ -536,7 +540,7 @@ const server = net.createServer((socket) => {
 
                             for (const member of channels.get(target)!) {
                                 member.write(
-                                    `:${nick}!${username}${SERVER_HOSTNAME} MODE ${target} -o ${targetNick}\r\n`
+                                    `:${userPrefix()} MODE ${target} -o ${targetNick}\r\n`
                                 );
                             }
 
@@ -550,7 +554,7 @@ const server = net.createServer((socket) => {
                             channelKeys.set(target, key);
 
                             for (const member of channels.get(target)!) {
-                                member.write(`:${nick}!${username}${SERVER_HOSTNAME} MODE ${target} +k ${key}\r\n`);
+                                member.write(`:${userPrefix()} MODE ${target} +k ${key}\r\n`);
                             }
 
                             continue;
@@ -560,7 +564,7 @@ const server = net.createServer((socket) => {
                             channelKeys.delete(target);
 
                             for (const member of channels.get(target)!) {
-                                member.write(`:${nick}!${username}${SERVER_HOSTNAME} MODE ${target} -k\r\n`);
+                                member.write(`:${userPrefix()} MODE ${target} -k\r\n`);
                             }
 
                             continue;
@@ -576,7 +580,7 @@ const server = net.createServer((socket) => {
                             channelLimits.set(target, limit);
 
                             for (const member of channels.get(target)!) {
-                                member.write(`:${nick}!${username}${SERVER_HOSTNAME} MODE ${target} +l ${limit}\r\n`);
+                                member.write(`:${userPrefix()} MODE ${target} +l ${limit}\r\n`);
                             }
 
                             continue;
@@ -586,7 +590,7 @@ const server = net.createServer((socket) => {
                             channelLimits.delete(target);
 
                             for (const member of channels.get(target)!) {
-                                member.write(`:${nick}!${username}${SERVER_HOSTNAME} MODE ${target} -l\r\n`);
+                                member.write(`:${userPrefix()} MODE ${target} -l\r\n`);
                             }
 
                             continue;
@@ -596,7 +600,7 @@ const server = net.createServer((socket) => {
                             topicProtectedChannels.add(target);
 
                             for (const member of channels.get(target)!) {
-                                member.write(`:${nick}!${username}${SERVER_HOSTNAME} MODE ${target} +t\r\n`);
+                                member.write(`:${userPrefix()} MODE ${target} +t\r\n`);
                             }
 
                             continue;
@@ -606,7 +610,7 @@ const server = net.createServer((socket) => {
                             topicProtectedChannels.delete(target);
 
                             for (const member of channels.get(target)!) {
-                                member.write(`:${nick}!${username}${SERVER_HOSTNAME} MODE ${target} -t\r\n`);
+                                member.write(`:${userPrefix()} MODE ${target} -t\r\n`);
                             }
 
                             continue;
@@ -642,7 +646,7 @@ const server = net.createServer((socket) => {
                     }
 
                     for (const member of members) {
-                        member.write(`:${nick}!${username}@${SERVER_HOSTNAME} PART ${channel}\r\n`);
+                        member.write(`:${userPrefix()} PART ${channel}\r\n`);
                     }
 
                     members.delete(socket);
@@ -738,7 +742,7 @@ const server = net.createServer((socket) => {
                         topics.set(channel, newTopic);
 
                         for (const member of members) {
-                            member.write(`:${nick}!${username}${SERVER_HOSTNAME} TOPIC ${channel} :${newTopic}\r\n`);
+                            member.write(`:${userPrefix()} TOPIC ${channel} :${newTopic}\r\n`);
                         }
 
                         continue;
@@ -781,7 +785,7 @@ const server = net.createServer((socket) => {
                     }
 
                     for (const member of members) {
-                        member.write(`:${nick}!${username}${SERVER_HOSTNAME} KICK ${channel} ${targetNick} :${reason}\r\n`);
+                        member.write(`:${userPrefix()} KICK ${channel} ${targetNick} :${reason}\r\n`);
                     }
 
                     members.delete(targetSocket);
@@ -863,7 +867,7 @@ const server = net.createServer((socket) => {
                         for (const member of members) {
                             if (member === socket) continue;
                             member.write(
-                                `:${nick}!${username}${SERVER_HOSTNAME} PRIVMSG ${target} :${message}\r\n`
+                                `:${userPrefix()} PRIVMSG ${target} :${message}\r\n`
                             );
                         }
                     } else {
@@ -879,7 +883,7 @@ const server = net.createServer((socket) => {
                         }
 
                         recipient.write(
-                            `:${nick}!${username}${SERVER_HOSTNAME} PRIVMSG ${target} :${message}\r\n`
+                            `:${userPrefix()} PRIVMSG ${target} :${message}\r\n`
                         );
                     }
                     break;
@@ -901,14 +905,14 @@ const server = net.createServer((socket) => {
                         for (const member of members) {
                             if (member === socket) continue;
                             member.write(
-                                `:${nick}!${username}${SERVER_HOSTNAME} NOTICE ${target} :${message}\r\n`
+                                `:${userPrefix()} NOTICE ${target} :${message}\r\n`
                             );
                         }
                     } else {
                         const recipient = clientsByNick.get(target);
                         if (!recipient) continue;
                         recipient.write(
-                            `:${nick}!${username}${SERVER_HOSTNAME} NOTICE ${target} :${message}\r\n`
+                            `:${userPrefix()} NOTICE ${target} :${message}\r\n`
                         );
                     }
                     break;
@@ -1001,7 +1005,7 @@ const server = net.createServer((socket) => {
 
             for (const member of members) {
                 if ((member as any).writableEnded || member.destroyed || !member.writable) continue;
-                member.write(`:${nick}!${username}${SERVER_HOSTNAME} QUIT :${reason}\r\n`);
+                member.write(`:${userPrefix()} QUIT :${reason}\r\n`);
             }
 
 
