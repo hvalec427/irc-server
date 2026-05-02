@@ -957,29 +957,52 @@ const server = net.createServer((socket) => {
                 case "WHO": {
                     const target = params[0]?.trim();
 
-                    if (!target || !target.startsWith("#")) {
-                        continue;
+                    if (!target) {
+                        send(`:${SERVER_HOSTNAME} 315 ${nick} * :End of WHO list`);
+                        break;
                     }
 
-                    const members = channels.get(target);
+                    if (target.startsWith("#")) {
+                        const members = channels.get(target);
 
-                    if (!members) {
-                        send(`:${SERVER_HOSTNAME} 403 ${nick} ${target} :No such channel`);
-                        continue;
+                        if (!members) {
+                            send(`:${SERVER_HOSTNAME} 403 ${nick} ${target} :No such channel`);
+                            break;
+                        }
+
+                        for (const member of members) {
+                            const memberNick = (member as any).nick;
+                            const memberUsername = (member as any).username ?? "unknown";
+                            const memberRealname = (member as any).realname ?? "unknown";
+                            const isAway = Boolean((member as any).awayMessage);
+                            const hereOrGone = isAway ? "G" : "H";
+
+                            send(
+                                `:${SERVER_HOSTNAME} 352 ${nick} ${target} ${memberUsername} ${SERVER_HOSTNAME} ${SERVER_HOSTNAME} ${memberNick} ${hereOrGone} :0 ${memberRealname}`
+                            );
+                        }
+
+                        send(`:${SERVER_HOSTNAME} 315 ${nick} ${target} :End of WHO list`);
+                        break;
                     }
 
-                    for (const member of members) {
-                        const memberNick = (member as any).nick;
-                        const memberUsername = (member as any).username;
-                        const memberRealname = (member as any).realname;
+                    {
+                        const client = clientsByNick.get(target);
+                        if (client) {
+                            const cNick = (client as any).nick ?? target;
+                            const cUser = (client as any).username ?? "unknown";
+                            const cReal = (client as any).realname ?? "unknown";
+                            const isAway = Boolean((client as any).awayMessage);
+                            const hereOrGone = isAway ? "G" : "H";
 
-                        send(
-                            `:${SERVER_HOSTNAME} 352 ${nick} ${target} ${memberUsername} ${SERVER_HOSTNAME} ${SERVER_HOSTNAME} ${memberNick} H :0 ${memberRealname}`
-                        );
+                            send(
+                                `:${SERVER_HOSTNAME} 352 ${nick} ${target} ${cUser} ${SERVER_HOSTNAME} ${SERVER_HOSTNAME} ${cNick} ${hereOrGone} :0 ${cReal}`
+                            );
+                        }
+
+                        send(`:${SERVER_HOSTNAME} 315 ${nick} ${target} :End of WHO list`);
+                        break;
                     }
-
-                    send(`:${SERVER_HOSTNAME} 315 ${nick} ${target} :End of WHO list`);
-                    break;
                 }
 
                 case "TOPIC": {
