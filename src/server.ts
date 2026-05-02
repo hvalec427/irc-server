@@ -130,10 +130,34 @@ const server = net.createServer((socket) => {
         socket.write(line + "\r\n");
     }
 
+    function defaultMotdLines(): string[] {
+        return [
+            `Serbus! Welcome to ${SERVER_HOSTNAME}.`,
+            "A tiny IRC server for friendly chat.",
+            "",
+            "Quick start:",
+            "- Pick a nick: /nick <name>",
+            "- Register (optional): AUTH REGISTER <password>",
+            "- Login: AUTH LOGIN <password>",
+            "- Join a channel: /join #general",
+            "- Help: HELP",
+            "",
+            "Rules:",
+            "- Don't be a dick.",
+            "",
+            `Users online right now: ${clientsByNick.size}`,
+            "",
+            `Version ${SERVER_VERSION} — ${SERVER_HOSTNAME}`,
+        ];
+    }
+
     function sendMotd(nick: string) {
-        send(`:${SERVER_HOSTNAME} 375 ${nick} :- ${SERVER_HOSTNAME} Message of the Day -`);
-        send(`:${SERVER_HOSTNAME} 372 ${nick} :- Serbus, welcome to my tiny IRC server`);
-        send(`:${SERVER_HOSTNAME} 376 ${nick} :End of /MOTD command`);
+        const recipient = nick || "*";
+        send(`:${SERVER_HOSTNAME} 375 ${recipient} :${SERVER_HOSTNAME} Message of the Day -`);
+        for (const line of defaultMotdLines()) {
+            send(`:${SERVER_HOSTNAME} 372 ${recipient} :${line}`);
+        }
+        send(`:${SERVER_HOSTNAME} 376 ${recipient} :End of /MOTD command`);
     }
 
     let disconnected = false;
