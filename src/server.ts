@@ -884,7 +884,13 @@ const server = net.createServer((socket) => {
                 case "LIST": {
                     send(`:${SERVER_HOSTNAME} 321 ${nick} Channel :Users Name`);
 
-                    for (const [channel, members] of channels) {
+                    const allChannels = new Set<string>([
+                        ...channels.keys(),
+                        ...persistableChannels,
+                    ]);
+
+                    for (const channel of allChannels) {
+                        const members = channels.get(channel) ?? new Set<net.Socket>();
                         const topic = topics.get(channel) ?? "No topic";
                         send(`:${SERVER_HOSTNAME} 322 ${nick} ${channel} ${members.size} :${topic}`);
                     }
@@ -1215,7 +1221,7 @@ const server = net.createServer((socket) => {
             }
 
 
-            if (members.size === 0) {
+            if (members.size === 0 && !persistableChannels.has(channel)) {
                 channels.delete(channel);
             }
         }
