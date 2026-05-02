@@ -165,6 +165,22 @@ const server = net.createServer((socket) => {
                     break;
                 }
 
+                case "CAP": {
+                    const subcommand = params[0]?.toUpperCase();
+
+                    if (subcommand === "LS") {
+                        // We don't advertise any capabilities for now
+                        send(`:${SERVER_HOSTNAME} CAP * LS :`);
+                    } else if (subcommand === "REQ") {
+                        // NAK all requests since we don't support any yet
+                        send(`:${SERVER_HOSTNAME} CAP * NAK :${params.slice(1).join(" ")}`);
+                    } else if (subcommand === "END") {
+                        // No special handling needed
+                    }
+
+                    break;
+                }
+
                 case "NICK": {
                     const requestedNick = params[0]?.trim();
 
@@ -978,7 +994,7 @@ const server = net.createServer((socket) => {
             }
 
             if (![
-                "PING", "PONG", "MOTD", "NICK", "USER", "AUTH", "AWAY", "ISON", "JOIN", "INVITE", "MODE", "PART", "LIST", "WHO", "TOPIC", "KICK", "NAMES", "PRIVMSG", "NOTICE", "WHOIS", "LUSERS", "QUIT"
+                "PING", "PONG", "MOTD", "CAP", "NICK", "USER", "AUTH", "AWAY", "ISON", "JOIN", "INVITE", "MODE", "PART", "LIST", "WHO", "TOPIC", "KICK", "NAMES", "PRIVMSG", "NOTICE", "WHOIS", "LUSERS", "QUIT"
             ].includes(command)) {
                 send(`:${SERVER_HOSTNAME} 421 ${nick || '*'} ${command} :Unknown command`);
             }
