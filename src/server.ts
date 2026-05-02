@@ -1,7 +1,7 @@
 import "dotenv/config";
 
-
 import net from "net";
+import { loadState, saveState, startPeriodicSaving } from "./state";
 
 const ENABLE_KEEPALIVE = process.env.ENABLE_KEEPALIVE === "true";
 const SERVER_HOSTNAME = process.env.SERVER_HOSTNAME || "irc.hvalec.com";
@@ -10,13 +10,17 @@ const usedNicks = new Set<string>();
 const channels = new Map<string, Set<net.Socket>>();
 const clientsByNick = new Map<string, net.Socket>();
 const topics = new Map<string, string>();
-const channelOperators = new Map<string, Set<net.Socket>>();
 const inviteOnlyChannels = new Set<string>();
 const channelInvites = new Map<string, Set<string>>();
 const channelKeys = new Map<string, string>();
 const channelLimits = new Map<string, number>();
 const topicProtectedChannels = new Set<string>();
 const accounts = new Map<string, string>();
+const channelOperatorNames = new Map<string, Set<string>>();
+
+loadState(accounts, topics, inviteOnlyChannels, topicProtectedChannels, channelKeys, channelLimits, channelOperatorNames);
+
+startPeriodicSaving(() => saveState(accounts, topics, inviteOnlyChannels, topicProtectedChannels, channelKeys, channelLimits, channelOperatorNames));
 
 function parseIrcLine(rawLine: string): { raw: string; command: string; params: string[] } | null {
     let line = rawLine.trim();
@@ -358,12 +362,12 @@ const server = net.createServer((socket) => {
                     channelInvites.get(channel)?.delete(nick);
 
                     channels.get(channel)!.add(socket);
-                    if (!channelOperators.has(channel)) {
-                        channelOperators.set(channel, new Set());
-                    }
 
-                    if (channelOperators.get(channel)!.size === 0) {
-                        channelOperators.get(channel)!.add(socket);
+                    if ((channelOperatorNames.get(channel)?.size ?? 0) === 0) {
+                        if (!channelOperatorNames.has(channel)) {
+                            channelOperatorNames.set(channel, new Set<string>());
+                        }
+                        channelOperatorNames.get(channel)!.add(nick);
                     }
                     for (const member of channels.get(channel)!) {
                         member.write(`:${nick}!${username}${SERVER_HOSTNAME} JOIN ${channel}\r\n`);
@@ -380,8 +384,7 @@ const server = net.createServer((socket) => {
                         .map((s) => {
                             const memberNick = (s as any).nick;
                             if (!memberNick) return null;
-
-                            const isOp = channelOperators.get(channel)?.has(s);
+                            const isOp = channelOperatorNames.get(channel)?.has(memberNick);
                             return `${isOp ? "@" : ""}${memberNick}`;
                         })
                         .filter(Boolean)
@@ -399,7 +402,6 @@ const server = net.createServer((socket) => {
                     if (!targetNick || !channel) continue;
 
                     const members = channels.get(channel);
-                    const ops = channelOperators.get(channel);
 
                     if (!members) {
                         send(`:${SERVER_HOSTNAME} 403 ${nick} ${channel} :No such channel`);
@@ -411,7 +413,7 @@ const server = net.createServer((socket) => {
                         continue;
                     }
 
-                    if (!ops?.has(socket)) {
+                    if (!channelOperatorNames.get(channel)?.has(nick)) {
                         send(`:${SERVER_HOSTNAME} 482 ${nick} ${channel} :You're not channel operator`);
                         continue;
                     }
@@ -449,9 +451,8 @@ const server = net.createServer((socket) => {
                             continue;
                         }
 
-                        const ops = channelOperators.get(target);
 
-                        if (!ops?.has(socket)) {
+                        if (!channelOperatorNames.get(target)?.has(nick)) {
                             send(`:${SERVER_HOSTNAME} 482 ${nick} ${target} :You're not channel operator`);
                             continue;
                         }
@@ -473,7 +474,7 @@ const server = net.createServer((socket) => {
 
                             if (!targetNick) continue;
 
-                            if (!ops?.has(socket)) {
+                            if (!channelOperatorNames.get(target)?.has(nick)) {
                                 send(`:${SERVER_HOSTNAME} 482 ${nick} ${target} :You're not channel operator`);
                                 continue;
                             }
@@ -485,7 +486,11 @@ const server = net.createServer((socket) => {
                                 continue;
                             }
 
-                            ops.add(targetSocket);
+                            // operator status is tracked by nickname only
+                            if (!channelOperatorNames.has(target)) {
+                                channelOperatorNames.set(target, new Set<string>());
+                            }
+                            channelOperatorNames.get(target)!.add(targetNick);
 
                             for (const member of channels.get(target)!) {
                                 member.write(
@@ -501,9 +506,8 @@ const server = net.createServer((socket) => {
 
                             if (!targetNick) continue;
 
-                            const ops = channelOperators.get(target);
 
-                            if (!ops?.has(socket)) {
+                            if (!channelOperatorNames.get(target)?.has(nick)) {
                                 send(`:${SERVER_HOSTNAME} 482 ${nick} ${target} :You're not channel operator`);
                                 continue;
                             }
@@ -515,10 +519,14 @@ const server = net.createServer((socket) => {
                                 continue;
                             }
 
-                            ops.delete(targetSocket);
+                            // remove operator privilege by nickname
+                            channelOperatorNames.get(target)?.delete(targetNick);
 
-                            if (ops.size === 0) {
-                                ops.add(targetSocket);
+                            const names = channelOperatorNames.get(target) ?? new Set<string>();
+                            if (names.size === 0) {
+                                // prevent removing the last operator
+                                names.add(targetNick);
+                                channelOperatorNames.set(target, names);
                                 send(`:${SERVER_HOSTNAME} 482 ${nick} ${target} :Cannot remove last operator`);
                                 continue;
                             }
@@ -636,13 +644,21 @@ const server = net.createServer((socket) => {
 
                     members.delete(socket);
 
-                    const ops = channelOperators.get(channel);
-
-                    if (ops && ops.size === 0 && members.size > 0) {
-                        const iterator = members.values().next();
-
-                        if (!iterator.done) {
-                            ops.add(iterator.value);
+                    const names = channelOperatorNames.get(channel);
+                    if (names?.has(nick)) {
+                        names.delete(nick);
+                    }
+                    // If no operators remain but members still present, promote first member
+                    if ((channelOperatorNames.get(channel)?.size ?? 0) === 0 && members.size > 0) {
+                        const next = members.values().next();
+                        if (!next.done) {
+                            const nextNick = (next.value as any).nick;
+                            if (nextNick) {
+                                if (!channelOperatorNames.has(channel)) {
+                                    channelOperatorNames.set(channel, new Set<string>());
+                                }
+                                channelOperatorNames.get(channel)!.add(nextNick);
+                            }
                         }
                     }
 
@@ -699,7 +715,6 @@ const server = net.createServer((socket) => {
                     if (!channel) continue;
 
                     const members = channels.get(channel);
-                    const ops = channelOperators.get(channel);
 
                     if (!members) {
                         send(`:${SERVER_HOSTNAME} 403 ${nick} ${channel} :No such channel`);
@@ -712,7 +727,7 @@ const server = net.createServer((socket) => {
                     }
 
                     if (newTopic) {
-                        if (topicProtectedChannels.has(channel) && !ops?.has(socket)) {
+                        if (topicProtectedChannels.has(channel) && !channelOperatorNames.get(channel)?.has(nick)) {
                             send(`:${SERVER_HOSTNAME} 482 ${nick} ${channel} :You're not channel operator`);
                             continue;
                         }
@@ -720,10 +735,9 @@ const server = net.createServer((socket) => {
                         topics.set(channel, newTopic);
 
                         for (const member of members) {
-                            member.write(
-                                `:${nick}!${username}${SERVER_HOSTNAME} TOPIC ${channel} :${newTopic}\r\n`
-                            );
+                            member.write(`:${nick}!${username}${SERVER_HOSTNAME} TOPIC ${channel} :${newTopic}\r\n`);
                         }
+
                         continue;
                     }
 
@@ -745,14 +759,13 @@ const server = net.createServer((socket) => {
                     if (!channel || !targetNick) continue;
 
                     const members = channels.get(channel);
-                    const operators = channelOperators.get(channel);
 
                     if (!members || !members.has(socket)) {
                         send(`:${SERVER_HOSTNAME} 442 ${nick} ${channel} :You're not on that channel`);
                         continue;
                     }
 
-                    if (!operators?.has(socket)) {
+                    if (!channelOperatorNames.get(channel)?.has(nick)) {
                         send(`:${SERVER_HOSTNAME} 482 ${nick} ${channel} :You're not channel operator`);
                         continue;
                     }
@@ -770,16 +783,19 @@ const server = net.createServer((socket) => {
 
                     members.delete(targetSocket);
 
-                    const ops = channelOperators.get(channel);
-
-                    if (ops) {
-                        ops.delete(targetSocket);
-
-                        if (ops.size === 0 && members.size > 0) {
-                            const iterator = members.values().next();
-
-                            if (!iterator.done) {
-                                ops.add(iterator.value);
+                    const names = channelOperatorNames.get(channel);
+                    if (names?.has(targetNick)) {
+                        names.delete(targetNick);
+                    }
+                    if ((channelOperatorNames.get(channel)?.size ?? 0) === 0 && members.size > 0) {
+                        const next = members.values().next();
+                        if (!next.done) {
+                            const nextNick = (next.value as any).nick;
+                            if (nextNick) {
+                                if (!channelOperatorNames.has(channel)) {
+                                    channelOperatorNames.set(channel, new Set<string>());
+                                }
+                                channelOperatorNames.get(channel)!.add(nextNick);
                             }
                         }
                     }
@@ -796,8 +812,9 @@ const server = net.createServer((socket) => {
 
                     const members = [...channels.get(channel)!]
                         .map((s) => {
-                            const isOp = channelOperators.get(channel)?.has(s);
-                            return (isOp ? "@" : "") + (s as any).nick;
+                            const memberNick = (s as any).nick;
+                            const isOp = channelOperatorNames.get(channel)?.has(memberNick);
+                            return (isOp ? "@" : "") + memberNick;
                         })
                         .filter(Boolean)
                         .join(" ");
@@ -982,17 +999,7 @@ const server = net.createServer((socket) => {
                 member.write(`:${nick}!${username}${SERVER_HOSTNAME} QUIT :${reason}\r\n`);
             }
 
-            const ops = channelOperators.get(channel);
-            if (ops) {
-                ops.delete(socket);
-
-                if (ops.size === 0 && members.size > 0) {
-                    const iterator = members.values().next();
-                    if (!iterator.done) {
-                        ops.add(iterator.value);
-                    }
-                }
-            }
+            // online operator sockets are not tracked; operator status persists by nickname
 
             if (members.size === 0) {
                 channels.delete(channel);
