@@ -1353,6 +1353,8 @@ const server = net.createServer((socket) => {
     });
 });
 
-server.listen(6667, () => {
-    console.info(`${SERVER_HOSTNAME} running on port 6667`);
+const PORT = parseInt(process.env.PORT ?? "6667", 10);
+
+server.listen(PORT, () => {
+    console.info(`${SERVER_HOSTNAME} running on port ${PORT}`);
 });
