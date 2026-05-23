@@ -1,6 +1,9 @@
 import "dotenv/config";
 
 import net from "net";
+import http from "http";
+import fs from "fs";
+import path from "path";
 import bcrypt from "bcryptjs";
 import { loadState, saveState, startPeriodicSaving } from "./state";
 
@@ -1357,4 +1360,21 @@ const PORT = parseInt(process.env.PORT ?? "6667", 10);
 
 server.listen(PORT, () => {
     console.info(`${SERVER_HOSTNAME} running on port ${PORT}`);
+});
+
+const HTML_FILE = path.join(__dirname, "index.html");
+const HTTP_PORT = parseInt(process.env.HTTP_PORT ?? "8080", 10);
+
+http.createServer((_req, res) => {
+    fs.readFile(HTML_FILE, (err, data) => {
+        if (err) {
+            res.writeHead(404);
+            res.end("Not found");
+            return;
+        }
+        res.writeHead(200, { "Content-Type": "text/html" });
+        res.end(data);
+    });
+}).listen(HTTP_PORT, () => {
+    console.info(`HTTP server running on port ${HTTP_PORT}`);
 });
