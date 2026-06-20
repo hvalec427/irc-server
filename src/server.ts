@@ -6,6 +6,7 @@ import fs from "fs";
 import path from "path";
 import bcrypt from "bcryptjs";
 import { loadState, saveState, startPeriodicSaving } from "./state";
+import { ircLogger, httpLogger } from "./logger";
 
 const ENABLE_KEEPALIVE = process.env.ENABLE_KEEPALIVE === "true";
 const SERVER_HOSTNAME = process.env.SERVER_HOSTNAME || "irc.hvalec.com";
@@ -183,7 +184,8 @@ const server = net.createServer((socket) => {
         }
     }
 
-    console.info("client connected");
+    const remoteAddress = socket.remoteAddress ?? "unknown";
+    ircLogger.info({ event: "connect", ip: remoteAddress });
 
     socket.on("data", async (data) => {
         const now = Date.now();
@@ -198,7 +200,13 @@ const server = net.createServer((socket) => {
             const line = parsed.raw;
             const { command, params } = parsed;
 
-            console.info("received:", line);
+            // Log without sensitive values for AUTH commands
+            if (command === "AUTH") {
+                const subcommand = params[0]?.toUpperCase();
+                ircLogger.info({ event: "command", ip: remoteAddress, nick: nick || null, command, subcommand });
+            } else {
+                ircLogger.info({ event: "command", ip: remoteAddress, nick: nick || null, command, raw: line });
+            }
 
             // Only treat actual user messages as activity for idle tracking
             const activityCommands = new Set(["PRIVMSG", "NOTICE"]);
@@ -343,7 +351,7 @@ const server = net.createServer((socket) => {
                     // If this is a mid-session nick change, broadcast it and update operator maps
                     if (oldNick) {
                         // Update channel operator name sets to keep permissions with the new nick
-                        for (const [ch, names] of channelOperatorNames) {
+                        for (const [, names] of channelOperatorNames) {
                             if (names?.has(oldNick)) {
                                 names.delete(oldNick);
                                 names.add(nick);
@@ -1348,33 +1356,40 @@ const server = net.createServer((socket) => {
             }
         }
 
-        console.info(`${nick || "client"} disconnected`);
+        ircLogger.info({ event: "disconnect", ip: remoteAddress, nick: nick || null, reason });
     });
 
     socket.on("error", (error) => {
-        console.info(`socket error for ${nick || "unknown"}: ${error.message}`);
+        ircLogger.warn({ event: "socket_error", ip: remoteAddress, nick: nick || null, error: error.message });
     });
 });
 
 const PORT = parseInt(process.env.PORT ?? "6667", 10);
 
 server.listen(PORT, () => {
-    console.info(`${SERVER_HOSTNAME} running on port ${PORT}`);
+    ircLogger.info({ event: "server_start", port: PORT, hostname: SERVER_HOSTNAME });
 });
 
 const HTML_FILE = path.join(__dirname, "index.html");
 const HTTP_PORT = parseInt(process.env.HTTP_PORT ?? "8080", 10);
 
-http.createServer((_req, res) => {
+http.createServer((req, res) => {
+    const start = Date.now();
+    const ip = req.socket.remoteAddress ?? "unknown";
+    const method = req.method ?? "GET";
+    const url = req.url ?? "/";
+
     fs.readFile(HTML_FILE, (err, data) => {
         if (err) {
             res.writeHead(404);
             res.end("Not found");
+            httpLogger.warn({ event: "request", ip, method, url, status: 404, ms: Date.now() - start });
             return;
         }
         res.writeHead(200, { "Content-Type": "text/html" });
         res.end(data);
+        httpLogger.info({ event: "request", ip, method, url, status: 200, ms: Date.now() - start });
     });
 }).listen(HTTP_PORT, () => {
-    console.info(`HTTP server running on port ${HTTP_PORT}`);
+    httpLogger.info({ event: "server_start", port: HTTP_PORT });
 });
