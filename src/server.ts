@@ -6,7 +6,7 @@ import fs from "fs";
 import path from "path";
 import bcrypt from "bcryptjs";
 import { loadState, saveState, startPeriodicSaving } from "./state";
-import { ircLogger, httpLogger } from "./logger";
+import { ircLogger, httpLogger, normalizeIp } from "./logger";
 
 const ENABLE_KEEPALIVE = process.env.ENABLE_KEEPALIVE === "true";
 const SERVER_HOSTNAME = process.env.SERVER_HOSTNAME || "irc.hvalec.com";
@@ -184,7 +184,7 @@ const server = net.createServer((socket) => {
         }
     }
 
-    const remoteAddress = socket.remoteAddress ?? "unknown";
+    const remoteAddress = normalizeIp(socket.remoteAddress ?? "unknown");
     ircLogger.info({ event: "connect", ip: remoteAddress });
 
     socket.on("data", async (data) => {
@@ -1366,7 +1366,7 @@ const server = net.createServer((socket) => {
 
 const PORT = parseInt(process.env.PORT ?? "6667", 10);
 
-server.listen(PORT, () => {
+server.listen(PORT, "0.0.0.0", () => {
     ircLogger.info({ event: "server_start", port: PORT, hostname: SERVER_HOSTNAME });
 });
 
@@ -1375,7 +1375,7 @@ const HTTP_PORT = parseInt(process.env.HTTP_PORT ?? "8080", 10);
 
 http.createServer((req, res) => {
     const start = Date.now();
-    const ip = req.socket.remoteAddress ?? "unknown";
+    const ip = normalizeIp(req.socket.remoteAddress ?? "unknown");
     const method = req.method ?? "GET";
     const url = req.url ?? "/";
 
@@ -1390,6 +1390,6 @@ http.createServer((req, res) => {
         res.end(data);
         httpLogger.info({ event: "request", ip, method, url, status: 200, ms: Date.now() - start });
     });
-}).listen(HTTP_PORT, () => {
+}).listen(HTTP_PORT, "0.0.0.0", () => {
     httpLogger.info({ event: "server_start", port: HTTP_PORT });
 });
